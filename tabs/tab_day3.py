@@ -1,6 +1,6 @@
 """
-3. Gun -- Cok Degiskenli Oynaklık: DCC, cDCC, ADCC, DECO & MVP Portfoy
-EYS'26 -- Pamukkale Universitesi
+3. Gün -- Çok Değişkenli Oynaklık: DCC, cDCC, ADCC, DECO & MVP Portföy
+EYS'26 -- Pamukkale Üniversitesi
 """
 
 import sys
@@ -236,7 +236,7 @@ def render():
     try:
         import numba  # noqa: F401
     except ImportError:
-        st.info("Numba bulunamadi -- saf NumPy kullaniliyor (daha yavas)")
+        st.info("Numba bulunamadı -- saf NumPy kullanılıyor (daha yavaş)")
 
     df = st.session_state.returns_df
     asset_cols = _asset_cols(df)
@@ -246,15 +246,15 @@ def render():
         "\U0001f4d6 Teori",
         "⚙️ Model Tahmini",
         "\U0001f504 DECO Modeli",
-        "\U0001f4ca Model Karsılastırması",
-        "\U0001f4bc MVP Portfoy",
+        "\U0001f4ca Model Karşılaştırması",
+        "\U0001f4bc MVP Portföy",
     ])
 
     # =========================================================================
     # TAB 1 -- THEORY
     # =========================================================================
     with tab_theory:
-        st.markdown("### DCC-GARCH Ailesi: Teorik Ozet")
+        st.markdown("### DCC-GARCH Ailesi: Teorik Özet")
 
         col1, col2 = st.columns(2)
 
@@ -266,38 +266,36 @@ $$H_t = D_t R_t D_t$$
 
 $D_t = \text{diag}(\sigma_{1t},\ldots,\sigma_{Nt})$
 
-**Q guncelleme:**
+**Q güncelleme:**
 $$Q_t = (1-a-b)\bar{Q} + a\,z_{t-1}z_{t-1}^\top + b\,Q_{t-1}$$
 
-**R normallesme:**
+**R normalleşme:**
 $$R_t = Q_t^{*-1} Q_t Q_t^{*-1}$$
 $$Q_t^* = \text{diag}(\sqrt{q_{11,t}},\ldots,\sqrt{q_{NN,t}})$$
 
-**Kisitlar:** $a>0,\; b>0,\; a+b<1$
+**Kısıtlar:** $a>0,\; b>0,\; a+b<1$
 
-**Iki asamali QMLE:**
-1. Her varlik icin GARCH(1,1)
+**İki aşamalı QMLE:**
+1. Her varlık için GARCH(1,1)
 2. $a$ ve $b$ DCC log-olabilirligi ile
 """)
 
         with col2:
             with st.expander("cDCC (Aielli 2013)", expanded=True):
                 st.markdown(r"""
-**Duzeltilmis Q guncelleme:**
-$$Q_t = (1-a-b)\bar{Q}
-      + a\,\tilde{z}_{t-1}\tilde{z}_{t-1}^\top
-      + b\,Q_{t-1}$$
+**Düzeltilmiş Q güncelleme:**
+$$Q_t = (1-a-b)\bar{Q} + a\,\tilde{z}_{t-1}\tilde{z}_{t-1}^\top + b\,Q_{t-1}$$
 
 $$\tilde{z}_{t-1} = Q_{t-1}^{*1/2}\,z_{t-1}$$
 
 **Neden gerekli?**
 
 Standart DCC'de $\bar{Q}$ tahmini asimptotik sapmaya
-yol acar. cDCC, $Q_{t-1}^{*1/2}$ ile standardize ederek
-$\bar{Q}$ tahminini tutarli kilar.
+yol açar. cDCC, $Q_{t-1}^{*1/2}$ ile standardize ederek
+$\bar{Q}$ tahminini tutarlı kilar.
 
-**Sonuc:** Buyuk $N$'de ve yuksek kalicilikta DCC ile
-cDCC belirgin bicimde ayrisir.
+**Sonuc:** Büyük $N$'de ve yüksek kalıcılikta DCC ile
+cDCC belirgin biçimde ayrışır.
 """)
 
         col3, col4 = st.columns(2)
@@ -305,22 +303,19 @@ cDCC belirgin bicimde ayrisir.
         with col3:
             with st.expander("ADCC (Cappiello et al. 2006)", expanded=True):
                 st.markdown(r"""
-**Asimetrik Q guncelleme:**
-$$Q_t = (1-a-b)\bar{Q} - c\bar{N}
-      + a\,z_{t-1}z_{t-1}^\top
-      + b\,Q_{t-1}
-      + c\,n_{t-1}n_{t-1}^\top$$
+**Asimetrik Q güncelleme:**
+$$Q_t = (1-a-b)\bar{Q} - c\bar{N} + a\,z_{t-1}z_{t-1}^\top + b\,Q_{t-1} + c\,n_{t-1}n_{t-1}^\top$$
 
-**Negatif sok vektoru:**
+**Negatif şok vektörü:**
 $$n_t = z_t \odot \mathbf{1}[z_t < 0]$$
 
-**Kosulsuz ortalama:**
+**Koşulsuz ortalama:**
 $$\bar{N} = \frac{1}{T}\sum_{t=1}^{T} n_t n_t^\top$$
 
-**Kisitlar:** $a>0,\; b>0,\; c\geq 0,\; a+b+c < 1$
+**Kısıtlar:** $a>0,\; b>0,\; c\geq 0,\; a+b+c < 1$
 
 Piyasalar dustugunde korelasyonlar artar;
-$c > 0$ bunu modellestirir.
+$c > 0$ bunu modelleştirir.
 """)
 
         with col4:
@@ -330,58 +325,56 @@ $c > 0$ bunu modellestirir.
 $$\rho_t = \frac{2}{N(N-1)}\sum_{i<j} R_{ij,t}^{\text{DCC}}$$
 
 **DECO korelasyon matrisi:**
-$$R_t^{\text{DECO}} = (1-\rho_t)I_N
-                    + \rho_t\,\mathbf{1}_N\mathbf{1}_N^\top$$
+$$R_t^{\text{DECO}} = (1-\rho_t)I_N + \rho_t\,\mathbf{1}_N\mathbf{1}_N^\top$$
 
 **Algoritma:**
 1. DCC ile $R_{ij,t}$ dizisini tahmin et
-2. Her $t$ icin $\rho_t$ hesapla
-3. $R_t^{\text{DECO}}$ olustur
+2. Her $t$ için $\rho_t$ hesapla
+3. $R_t^{\text{DECO}}$ oluştur
 
 **Avantaj:** $N>50$'de $O(1)$ parametre.
 """)
 
         st.divider()
 
-        with st.expander("Korelasyon Yari-Omru (Half-Life)", expanded=False):
+        with st.expander("Korelasyon Yarı-Ömrü (Half-Life)", expanded=False):
             st.markdown(r"""
 $$\tau_{1/2} = \frac{\ln(0.5)}{\ln(a+b)}$$
 
-| $a+b$ | Yari-Omur |
+| $a+b$ | Yarı-Ömür |
 |-------|-----------|
-| 0.990 | 69 gun |
-| 0.975 | 27 gun |
-| 0.950 | 14 gun |
-| 0.900 | 7 gun  |
-| 0.800 | 3 gun  |
+| 0.990 | 69 gün |
+| 0.975 | 27 gün |
+| 0.950 | 14 gün |
+| 0.900 | 7 gün  |
+| 0.800 | 3 gün  |
 
-$a+b \to 1$ iken korelasyon sokları kalici hale gelir.
-Finansal serilerde tipik deger $a+b \in [0.97, 0.99]$.
+$a+b \to 1$ iken korelasyon şokları kalıcı hale gelir.
+Finansal serilerde tipik değer $a+b \in [0.97, 0.99]$.
 """)
 
-        with st.expander("Iki Asamali Tahmin (Two-Step QMLE)", expanded=False):
+        with st.expander("İki Aşamalı Tahmin (Two-Step QMLE)", expanded=False):
             st.markdown(r"""
-| Adim | Islem | Yontem | Hedef |
+| Adım | İşlem | Yöntem | Hedef |
 |------|--------|--------|-------|
-| **1** | Her varlik icin GARCH(1,1) | QMLE | $\hat{\sigma}_{it}$, $z_{it}$ |
-| **2** | DCC parametrelerini tahmin et | Bilesik QMLE | $\hat{a}$, $\hat{b}$ (ve $\hat{c}$) |
+| **1** | Her varlık için GARCH(1,1) | QMLE | $\hat{\sigma}_{it}$, $z_{it}$ |
+| **2** | DCC parametrelerini tahmin et | Bileşik QMLE | $\hat{a}$, $\hat{b}$ (ve $\hat{c}$) |
 
-**DCC log-olabilirlik (2. adim):**
-$$\ell(a,b) = -\frac{1}{2}\sum_{t=1}^{T}
-  \bigl[\log|R_t| + z_t^\top R_t^{-1} z_t - z_t^\top z_t\bigr]$$
+**DCC log-olabilirlik (2. adım):**
+$$\ell(a,b) = -\frac{1}{2}\sum_{t=1}^{T}\bigl[\log|R_t| + z_t^\top R_t^{-1} z_t - z_t^\top z_t\bigr]$$
 
-**Neden iki adim?** Tam ortak tahmin $O(N^2)$ parametre gerektirir.
+**Neden iki adım?** Tam ortak tahmin $O(N^2)$ parametre gerektirir.
 GARCH + DCC bunu $2N + 2$'ye indirir.
 """)
 
-        with st.expander("Model Karsilastirma Tablosu", expanded=False):
+        with st.expander("Model Karşılaştırma Tablosu", expanded=False):
             st.markdown(r"""
-| Model | Param. | Avantajlar | Dezavantajlar | Buyuk N |
+| Model | Param. | Avantajlar | Dezavantajlar | Büyük N |
 |-------|--------|------------|---------------|---------|
 | **DCC** | a, b | Basit, yorumlanabilir | $\bar{Q}$ tutarsız | Orta ($N<50$) |
-| **cDCC** | a, b | Tutarli $\bar{Q}$ | Daha yavas | Orta ($N<50$) |
-| **ADCC** | a, b, c | Asimetriyi yakalar | Kisit karmasık | Orta ($N<30$) |
-| **DECO** | a, b | $O(1)$ param., hizli | Bilgi kaybi | Buyuk ($N>50$) |
+| **cDCC** | a, b | Tutarlı $\bar{Q}$ | Daha yavaş | Orta ($N<50$) |
+| **ADCC** | a, b, c | Asimetriyi yakalar | Kısıt karmasık | Orta ($N<30$) |
+| **DECO** | a, b | $O(1)$ param., hızlı | Bilgi kaybi | Büyük ($N>50$) |
 """)
 
     # =========================================================================
@@ -393,20 +386,20 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
         col_a, col_b = st.columns(2)
         with col_a:
             selected_assets = st.multiselect(
-                "Varliklar",
+                "Varlıklar",
                 asset_cols,
                 default=asset_cols[:3],
                 key="t2_assets",
             )
         with col_b:
             model_type = st.selectbox(
-                "Model Turu",
+                "Model Türü",
                 ["DCC", "cDCC", "ADCC"],
                 key="t2_model",
             )
 
         if len(selected_assets) < 2:
-            st.warning("En az 2 varlik seciniz.")
+            st.warning("En az 2 varlık seçiniz.")
             st.stop()
 
         pairs = [
@@ -414,13 +407,13 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
             for i in range(len(selected_assets))
             for j in range(i + 1, len(selected_assets))
         ]
-        selected_pair = st.selectbox("Korelasyon Cifti Grafigi", pairs, key="t2_pair")
+        selected_pair = st.selectbox("Korelasyon Çifti Grafigi", pairs, key="t2_pair")
 
         with st.spinner(f"{model_type} modeli tahmin ediliyor..."):
             try:
                 result = _run_dcc_model(tuple(selected_assets), model_type, dh)
             except Exception as exc:
-                st.error(f"Model tahmini basarisiz oldu. Farkli varlik sayisi deneyin.\n\n`{exc}`")
+                st.error(f"Model tahmini başarısız oldu. Farklı varlık sayisi deneyin.\n\n`{exc}`")
                 st.stop()
 
         stats = result["stats"]
@@ -440,19 +433,19 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
 
         if is_adcc:
             metric_defs = [
-                ("alpha (DCC alpha)", f"{alpha_v:.4f}", "Kisa donem korelasyon tepkisi"),
-                ("beta (DCC beta)", f"{beta_v:.4f}", "Korelasyon kaliciligi"),
-                ("c (Asimetri)", f"{c_v:.4f}", "Negatif sok etkisi"),
-                ("alpha + beta", f"{persist:.4f}", "1'e yakınsa yuksek kalicilik"),
-                ("Yari-Omur (gun)", f"{hl:.1f}", "Korelasyon soklari"),
+                ("alpha (DCC alpha)", f"{alpha_v:.4f}", "Kısa dönem korelasyon tepkisi"),
+                ("beta (DCC beta)", f"{beta_v:.4f}", "Korelasyon kalıcılığı"),
+                ("c (Asimetri)", f"{c_v:.4f}", "Negatif şok etkisi"),
+                ("alpha + beta", f"{persist:.4f}", "1'e yakınsa yüksek kalıcılik"),
+                ("Yarı-Ömür (gün)", f"{hl:.1f}", "Korelasyon şokları"),
                 ("Ort. Korelasyon", f"{mean_corr:.4f}", "Zaman ortalaması"),
             ]
         else:
             metric_defs = [
-                ("alpha (DCC alpha)", f"{alpha_v:.4f}", "Kisa donem korelasyon tepkisi"),
-                ("beta (DCC beta)", f"{beta_v:.4f}", "Korelasyon kaliciligi"),
-                ("alpha + beta", f"{persist:.4f}", "1'e yakınsa yuksek kalicilik"),
-                ("Yari-Omur (gun)", f"{hl:.1f}", "Korelasyon soklari"),
+                ("alpha (DCC alpha)", f"{alpha_v:.4f}", "Kısa dönem korelasyon tepkisi"),
+                ("beta (DCC beta)", f"{beta_v:.4f}", "Korelasyon kalıcılığı"),
+                ("alpha + beta", f"{persist:.4f}", "1'e yakınsa yüksek kalıcılik"),
+                ("Yarı-Ömür (gün)", f"{hl:.1f}", "Korelasyon şokları"),
                 ("Ort. Korelasyon", f"{mean_corr:.4f}", "Zaman ortalaması"),
             ]
 
@@ -482,7 +475,7 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
         )
         fig_corr.update_layout(
             template=PLOT_TEMPLATE,
-            title=f"Dinamik Kosullu Korelasyon -- {selected_pair} ({model_type})",
+            title=f"Dinamik Koşullu Korelasyon -- {selected_pair} ({model_type})",
             xaxis_title="Tarih",
             yaxis_title="Korelasyon rho",
             height=380,
@@ -505,14 +498,14 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
             )
         fig_vol.update_layout(
             template=PLOT_TEMPLATE,
-            title="Kosullu Standart Sapma (%) -- Marjinal GARCH(1,1)",
+            title="Koşullu Standart Sapma (%) -- Marjinal GARCH(1,1)",
             height=280,
             showlegend=False,
             margin=dict(l=20, r=20, t=50, b=30),
         )
         st.plotly_chart(fig_vol, use_container_width=True)
 
-        with st.expander("Tahmin Detaylari"):
+        with st.expander("Tahmin Detayları"):
             st.json({
                 "model_type": model_type,
                 "alpha": round(alpha_v, 6),
@@ -532,35 +525,35 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
         st.markdown("### DECO -- Dinamik Ekikorelasyon Modeli")
 
         st.info(
-            "DECO, N>50 portfoylerde DCC'yi asan hiz avantajı sunar: "
-            "O(1) vs O(N^2) parametre. Tum ciftlerin ortalaması olan "
+            "DECO, N>50 portföylerde DCC'yi asan hız avantajı sunar: "
+            "O(1) vs O(N^2) parametre. Tum çiftlerin ortalaması olan "
             "tek bir rho_t serisi tahmin edilir."
         )
 
         col_da, col_db = st.columns(2)
         with col_da:
             deco_assets = st.multiselect(
-                "Varliklar (DECO)",
+                "Varlıklar (DECO)",
                 asset_cols,
                 default=asset_cols,
                 key="t3_assets",
             )
         with col_db:
             show_dcc_compare = st.checkbox(
-                "DCC ortalama korelasyonuyla karsilastir",
+                "DCC ortalama korelasyonuyla karşılaştır",
                 value=True,
                 key="t3_compare",
             )
 
         if len(deco_assets) < 2:
-            st.warning("En az 2 varlik seciniz.")
+            st.warning("En az 2 varlık seçiniz.")
             st.stop()
 
         with st.spinner("DECO modeli tahmin ediliyor..."):
             try:
                 deco_res = _run_deco_model(tuple(deco_assets), dh)
             except Exception as exc:
-                st.error(f"Model tahmini basarisiz oldu. Farkli varlik sayisi deneyin.\n\n`{exc}`")
+                st.error(f"Model tahmini başarısız oldu. Farklı varlık sayisi deneyin.\n\n`{exc}`")
                 st.stop()
 
         rho = deco_res["rho_series"]
@@ -620,7 +613,7 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
             ))
             fig_cmp.update_layout(
                 template=PLOT_TEMPLATE,
-                title="DECO vs DCC Ortalama Korelasyon Karsilastırması",
+                title="DECO vs DCC Ortalama Korelasyon Karşılaştırması",
                 xaxis_title="Tarih",
                 yaxis_title="Ortalama Korelasyon",
                 height=280,
@@ -628,7 +621,7 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
             )
             st.plotly_chart(fig_cmp, use_container_width=True)
 
-        st.markdown("#### DECO Parametre Ozeti")
+        st.markdown("#### DECO Parametre Özeti")
         deco_a = deco_stats["alpha"]
         deco_b = deco_stats["beta"]
         deco_p = deco_stats["persistence"]
@@ -640,7 +633,7 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
             "alpha": f"{deco_a:.4f}",
             "beta": f"{deco_b:.4f}",
             "alpha+beta": f"{deco_p:.4f}",
-            "Yari-Omur (gun)": f"{deco_hl:.1f}",
+            "Yarı-Ömür (gün)": f"{deco_hl:.1f}",
             "Ort. Ekikorelasyon": f"{deco_mc:.4f}",
             "Ornek Ort. Korelasyon": f"{sample_mean:.4f}",
         }])
@@ -649,34 +642,34 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
         st.markdown("""
 **Temel Bulgular:**
 - N buyudukce DECO'nun hesaplama avantajı belirginlesir.
-- rho_t'nin yuksek oldugu donemler piyasa krizlerine isaret eder.
-- DECO, tek bir skaler korelasyon varsayımı yaptıgından portfoy
-  cesitlendirme stratejilerinde muhafazakar bir alt sinir sunar.
+- rho_t'nin yüksek oldugu dönemler piyasa krizlerine işaret eder.
+- DECO, tek bir skaler korelasyon varsayımı yaptıgından portföy
+  çeşitlendirme stratejilerinde muhafazakar bir alt sınır sunar.
 """)
 
     # =========================================================================
     # TAB 4 -- MODEL COMPARISON
     # =========================================================================
     with tab_compare:
-        st.markdown("### Model Karsilastırması: DCC, cDCC, DECO")
-        st.caption("Hız icin sabit 3 varlik onerilir; asagıdan degistirebilirsiniz.")
+        st.markdown("### Model Karşılaştırması: DCC, cDCC, DECO")
+        st.caption("Hız için sabit 3 varlık önerilir; aşağıdan değiştirebilirsiniz.")
 
         cmp_assets = st.multiselect(
-            "Karsilastirma Icin Varliklar (onerilen: 3)",
+            "Karşılaştırma İçin Varlıklar (önerilen: 3)",
             asset_cols,
             default=asset_cols[:3],
             key="t4_assets",
         )
 
         if len(cmp_assets) < 2:
-            st.warning("En az 2 varlik seciniz.")
+            st.warning("En az 2 varlık seçiniz.")
             st.stop()
 
         with st.spinner("DCC, cDCC ve DECO tahmin ediliyor..."):
             try:
                 cmp_results = _run_comparison(tuple(cmp_assets), dh)
             except Exception as exc:
-                st.error(f"Model tahmini basarisiz oldu. Farkli varlik sayisi deneyin.\n\n`{exc}`")
+                st.error(f"Model tahmini başarısız oldu. Farklı varlık sayisi deneyin.\n\n`{exc}`")
                 st.stop()
 
         rows = []
@@ -686,12 +679,12 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
                 "alpha": round(s["alpha"], 4),
                 "beta": round(s["beta"], 4),
                 "alpha+beta": round(s["persistence"], 4),
-                "Yari-Omur (gun)": round(s["half_life_days"], 1),
+                "Yarı-Ömür (gün)": round(s["half_life_days"], 1),
                 "Ort. Korelasyon": round(s["mean_corr"], 4),
             })
 
         df_cmp = pd.DataFrame(rows)
-        st.markdown("#### Parametre Karsilastırması")
+        st.markdown("#### Parametre Karşılaştırması")
 
         def _highlight_persist(val):
             try:
@@ -719,7 +712,7 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
         ))
         fig_bar.update_layout(
             template=PLOT_TEMPLATE,
-            title="Modellere Gore Ortalama Cift Korelasyon",
+            title="Modellere Gore Ortalama Çift Korelasyon",
             xaxis_title="Model",
             yaxis_title="Ortalama Korelasyon",
             height=280,
@@ -729,16 +722,16 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
 
         fig_hl = go.Figure(go.Bar(
             x=[r["Model"] for r in rows],
-            y=[r["Yari-Omur (gun)"] for r in rows],
+            y=[r["Yarı-Ömür (gün)"] for r in rows],
             marker_color=[COLORS[(i + 3) % len(COLORS)] for i in range(len(rows))],
-            text=[f"{r['Yari-Omur (gun)']:.1f} gun" for r in rows],
+            text=[f"{r['Yarı-Ömür (gün)']:.1f} gün" for r in rows],
             textposition="outside",
         ))
         fig_hl.update_layout(
             template=PLOT_TEMPLATE,
-            title="Korelasyon Soku Yari-Omur Karsilastırması",
+            title="Korelasyon Soku Yarı-Ömür Karşılaştırması",
             xaxis_title="Model",
-            yaxis_title="Yari-Omur (gun)",
+            yaxis_title="Yarı-Ömür (gün)",
             height=280,
             margin=dict(l=20, r=20, t=50, b=30),
         )
@@ -748,20 +741,20 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
         st.markdown(r"""
 | Model | Kullanım Durumu |
 |-------|----------------|
-| **DCC** | Hizli prototipleme, az varlik ($N<20$), yorumlanabilirlik |
-| **cDCC** | Tutarli parametre tahmini; yuksek kalicilik |
-| **ADCC** | Asimetrik korelasyon dinamikleri (kriz donemlerinde) |
-| **DECO** | Buyuk portfoy ($N>50$), gercek zamanli risk, $O(1)$ olcekleme |
+| **DCC** | Hızlı prototipleme, az varlık ($N<20$), yorumlanabilirlik |
+| **cDCC** | Tutarlı parametre tahmini; yüksek kalıcılik |
+| **ADCC** | Asimetrik korelasyon dinamikleri (kriz dönemlerinde) |
+| **DECO** | Büyük portföy ($N>50$), gerçek zamanli risk, $O(1)$ ölçekleme |
 
-**Genel kural:** $\alpha + \beta$ modeller arasında buyuk fark yoksa DCC yeterlidir.
-Buyuk $N$ icin DECO'yu tercih edin.
+**Genel kural:** $\alpha + \beta$ modeller arasında büyük fark yoksa DCC yeterlidir.
+Büyük $N$ için DECO'yu tercih edin.
 """)
 
     # =========================================================================
     # TAB 5 -- MVP PORTFOLIO
     # =========================================================================
     with tab_portfolio:
-        st.markdown("### Minimum Varyans Portfoy (MVP) -- DCC Tabanli")
+        st.markdown("### Minimum Varyans Portföy (MVP) -- DCC Tabanlı")
         st.markdown(r"""
 $$w_t = \frac{H_t^{-1}\mathbf{1}}{\mathbf{1}^\top H_t^{-1}\mathbf{1}}$$
 """)
@@ -769,27 +762,27 @@ $$w_t = \frac{H_t^{-1}\mathbf{1}}{\mathbf{1}^\top H_t^{-1}\mathbf{1}}$$
         col_pa, col_pb = st.columns(2)
         with col_pa:
             mvp_assets = st.multiselect(
-                "Varliklar (2-8)",
+                "Varlıklar (2-8)",
                 asset_cols,
                 default=asset_cols[:4],
                 key="t5_assets",
             )
         with col_pb:
             mvp_model = st.selectbox(
-                "Model Turu",
+                "Model Türü",
                 ["DCC", "cDCC", "ADCC", "DECO"],
                 key="t5_model",
             )
 
         if not (2 <= len(mvp_assets) <= 8):
-            st.warning("2 ile 8 arasinda varlik seciniz.")
+            st.warning("2 ile 8 arasinda varlık seçiniz.")
             st.stop()
 
         with st.spinner(f"MVP agırlıkları hesaplanıyor ({mvp_model})..."):
             try:
                 mvp_res = _run_mvp(tuple(mvp_assets), mvp_model, dh)
             except Exception as exc:
-                st.error(f"Model tahmini basarisiz oldu. Farkli varlik sayisi deneyin.\n\n`{exc}`")
+                st.error(f"Model tahmini başarısız oldu. Farklı varlık sayisi deneyin.\n\n`{exc}`")
                 st.stop()
 
         weights = mvp_res["weights"]
@@ -814,7 +807,7 @@ $$w_t = \frac{H_t^{-1}\mathbf{1}}{\mathbf{1}^\top H_t^{-1}\mathbf{1}}$$
             template=PLOT_TEMPLATE,
             title=f"Dinamik MVP Agırlıkları -- {mvp_model}",
             xaxis_title="Tarih",
-            yaxis_title="Agirlik",
+            yaxis_title="Ağırlık",
             height=380,
             margin=dict(l=20, r=20, t=50, b=30),
             yaxis=dict(tickformat=".0%"),
@@ -843,14 +836,14 @@ $$w_t = \frac{H_t^{-1}\mathbf{1}}{\mathbf{1}^\top H_t^{-1}\mathbf{1}}$$
             x=mvp_idx,
             y=port_vol_ew * 100,
             mode="lines",
-            name="Esit Agirlik",
+            name="Esit Ağırlık",
             line=dict(color=COLORS[1], width=1.5, dash="dash"),
         ))
         fig_pv.update_layout(
             template=PLOT_TEMPLATE,
-            title=f"Portfoy Oynakligi (%/gun) -- MVP vs Esit Agirlik ({mvp_model})",
+            title=f"Portföy Oynaklığı (%/gun) -- MVP vs Esit Ağırlık ({mvp_model})",
             xaxis_title="Tarih",
-            yaxis_title="Portfoy Volatilitesi (%)",
+            yaxis_title="Portföy Volatilitesi (%)",
             height=280,
             margin=dict(l=20, r=20, t=50, b=30),
         )
@@ -875,10 +868,10 @@ $$w_t = \frac{H_t^{-1}\mathbf{1}}{\mathbf{1}^\top H_t^{-1}\mathbf{1}}$$
         )
 
         metric_defs_mvp = [
-            ("MVP Yillik Vol. (%)", f"{mvp_ann_vol:.2f}"),
-            ("EW Yillik Vol. (%)", f"{ew_ann_vol:.2f}"),
-            ("Maks. Ort. Agirlik", f"{max_weight:.3f}"),
-            ("Gunluk Devir", f"{turnover:.4f}"),
+            ("MVP Yıllık Vol. (%)", f"{mvp_ann_vol:.2f}"),
+            ("EW Yıllık Vol. (%)", f"{ew_ann_vol:.2f}"),
+            ("Maks. Ort. Ağırlık", f"{max_weight:.3f}"),
+            ("Günlük Devir", f"{turnover:.4f}"),
         ]
         m_cols = st.columns(len(metric_defs_mvp))
         for mc, (lbl, val) in zip(m_cols, metric_defs_mvp):
@@ -887,22 +880,22 @@ $$w_t = \frac{H_t^{-1}\mathbf{1}}{\mathbf{1}^\top H_t^{-1}\mathbf{1}}$$
 
         st.markdown("")
 
-        st.markdown("#### MVP vs Esit Agirlik Portfoy Karsilastırması")
+        st.markdown("#### MVP vs Esit Ağırlık Portföy Karşılaştırması")
         cmp_df = pd.DataFrame([
             {
-                "Portfoy": "Minimum Varyans (MVP)",
-                "Yillik Vol. (%)": f"{mvp_ann_vol:.2f}",
+                "Portföy": "Minimum Varyans (MVP)",
+                "Yıllık Vol. (%)": f"{mvp_ann_vol:.2f}",
                 "Sharpe Orani": f"{mvp_sharpe:.3f}" if not np.isnan(mvp_sharpe) else "---",
             },
             {
-                "Portfoy": "Esit Agirlik (1/N)",
-                "Yillik Vol. (%)": f"{ew_ann_vol:.2f}",
+                "Portföy": "Esit Ağırlık (1/N)",
+                "Yıllık Vol. (%)": f"{ew_ann_vol:.2f}",
                 "Sharpe Orani": f"{ew_sharpe:.3f}" if not np.isnan(ew_sharpe) else "---",
             },
         ])
         st.dataframe(cmp_df, use_container_width=True, hide_index=True)
 
-        with st.expander("Agirlik Ozet Istatistikleri"):
+        with st.expander("Ağırlık Özet İstatistikleri"):
             df_w_desc = pd.DataFrame(weights, index=mvp_idx, columns=mvp_cols)
             st.dataframe(
                 df_w_desc.describe().round(4).style.background_gradient(cmap="RdPu"),
