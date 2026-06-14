@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+
+# Geliştirme artıkları (repo'ya dahil edilmeyecek)
+data_downloader.py
+data_generator.py
+extract_pdf.py
+extracted_text.txt
+find_pelve.py
+pelve_notes.txt
+
+# Ortam
+.env
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
