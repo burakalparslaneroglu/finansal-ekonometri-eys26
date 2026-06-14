@@ -1,7 +1,7 @@
 """
-5. Gun - Gerceklesen Oynaklk & Buyuk Boyut Kovaryans
-HAR-RV, TSRV, Imza Grafigi, Sicramalar, HEAVY, GARCH-X, Realized GARCH
-POET, Ledoit-Wolf, Marchenko-Pastur, MVP Karsilastirmasi - EYS-26
+5. Gün - Gerçekleşen Oynaklık & Büyük Boyut Kovaryans
+HAR-RV, TSRV, Imza Grafigi, Sıçramalar, HEAVY, GARCH-X, Realized GARCH
+POET, Ledoit-Wolf, Marchenko-Pastur, MVP Karşılaştırması - EYS-26
 """
 
 import sys, os
@@ -67,7 +67,7 @@ def _step_card(n, title, body):
         'padding:0.9rem 1.1rem;margin:6px 0;color:white;">'
         '<span style="background:linear-gradient(90deg,#667eea,#764ba2);color:white;'
         'padding:2px 10px;border-radius:12px;font-size:0.75rem;font-weight:700;'
-        f'margin-right:8px;">Adim {n}</span>'
+        f'margin-right:8px;">Adım {n}</span>'
         f'<strong>{title}</strong>'
         f'<div style="font-size:0.85rem;opacity:0.8;margin-top:4px;">{body}</div>'
         '</div>'
@@ -204,8 +204,8 @@ def render():
         "Teori",
         "Volatilite Imza Grafigi",
         "HAR-RV Modeli",
-        "Yuksek Frekansli Modeller",
-        "Buyuk Boyut Kovaryans",
+        "Yüksek Frekanslı Modeller",
+        "Büyük Boyut Kovaryans",
         "Entegre Analiz: HAR + POET MVP",
     ])
 
@@ -213,43 +213,43 @@ def render():
     # TAB 1: TEORi
     # =========================================================================
     with tab_theory:
-        st.markdown("### Gerceklesen Oynaklk & Buyuk Boyut Kovaryans: Teori")
+        st.markdown("### Gerçekleşen Oynaklık & Büyük Boyut Kovaryans: Teori")
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            st.markdown("#### Gerceklesen Varyans")
+            st.markdown("#### Gerçekleşen Varyans")
             st.markdown(r"""
 **Tanim (Andersen & Bollerslev, 1998):**
 $$RV_t = \sum_{j=1}^{M} r_{t,j}^2 \;\xrightarrow{p}\; \int_0^1 \sigma_t^2(s)\,ds$$
-$r_{t,j}$: $M$ esit araliklI gun-ici getiri. $M\to\infty$ ile RV, entegre varyansa yakinsar.
+$r_{t,j}$: $M$ eşit aralıklı gun-ici getiri. $M\to\infty$ ile RV, entegre varyansa yakinsar.
 
 ---
-**Iki Olcekli RV -- TSRV (Zhang, Mykland & Ait-Sahalia, 2005):**
-$$\widehat{RV}^{TS} = \widehat{RV}^{(yavash)} - \frac{n_{yavash}}{n_{hizli}}\,\widehat{RV}^{(hizli)}$$
-Yavash frekans bias'ini yok eder; hizli frekans gurultusunu cikarir. $O(n^{-1/6})$ yakinshma hizi.
+**İki Ölçekli RV -- TSRV (Zhang, Mykland & Ait-Sahalia, 2005):**
+$$\widehat{RV}^{TS} = \widehat{RV}^{(yavash)} - \frac{n_{yavash}}{n_{hızlı}}\,\widehat{RV}^{(hızlı)}$$
+Yavash frekans bias'ini yok eder; hızlı frekans gürültüsunu cikarir. $O(n^{-1/6})$ yakinshma hizi.
 
 ---
 **Realized Kernel (Barndorff-Nielsen et al., 2008, Econometrica):**
 $$RK = \sum_{h=-H}^{H} k\!\left(\tfrac{h}{H}\right)\hat{\gamma}_h, \quad k(\cdot):\text{Parzen cekirdegi}$$
-$\hat{\gamma}_h$: oto-kovaryans; cekirdek agirliklar gurultuyu sondurur.
+$\hat{\gamma}_h$: oto-kovaryans; cekirdek ağırlıklar gürültüyu sondurur.
 
 ---
-**Oynaklk Imza Grafigi:**
-Ornekleme frekansi yukseldikce mikroyapi gurultusu artar ve RV pozitif yanli olur.
+**Oynaklık Imza Grafigi:**
+Ornekleme frekansi yukseldikce mikroyapi gürültüsu artar ve RV pozitif yanli olur.
 **5 dakika kurali:** Bandi & Russell (2006).
-Teorik: $RV(f) = IV + 2\eta^2/f$ (gurultu-sinyal ayristirmasi).
+Teorik: $RV(f) = IV + 2\eta^2/f$ (gürültü-sinyal ayristirmasi).
 
 ---
 **Bagimsiz Kuvvet Varyasyonu (BPV):**
 $$BPV_t = \frac{\pi}{2}\sum_{j=2}^{M}|r_{t,j}|\,|r_{t,j-1}|$$
-Sicramalardan bagimsiz: $BPV_t \xrightarrow{p} \int_0^1\sigma_t^2(s)\,ds$.
+Sıçramalardan bagimsiz: $BPV_t \xrightarrow{p} \int_0^1\sigma_t^2(s)\,ds$.
 
-**Sicrama bilesheni:**
+**Sıçrama bilesheni:**
 $$J_t = \max(0,\; RV_t - BPV_t)$$
 
-**BNS Sicrama Testi (Barndorff-Nielsen & Shephard, 2006):**
+**BNS Sıçrama Testi (Barndorff-Nielsen & Shephard, 2006):**
 $$z_t = \frac{RV_t - BPV_t}{\sqrt{(\pi^2/4+\pi-5)\,\max(1,\,\widehat{TQ}_t/BPV_t^2)/M}}$$
-$z_t > z_{0.999}$ => sicrama anlamli.
+$z_t > z_{0.999}$ => sıçrama anlamli.
 """)
 
         with col2:
@@ -257,7 +257,7 @@ $z_t > z_{0.999}$ => sicrama anlamli.
             st.markdown(r"""
 **HAR-RV (Corsi, 2009):**
 $$RV_t^{(d)} = \beta_0 + \beta_d RV_{t-1}^{(d)} + \beta_w RV_{t-1}^{(w)} + \beta_m RV_{t-1}^{(m)} + \varepsilon_t$$
-$RV^{(w)}$: 5 gunluk, $RV^{(m)}$: 22 gunluk ortalama. Uzun bellegi basit OLS ile yakalar. R2 ~ 0.40-0.65.
+$RV^{(w)}$: 5 günlük, $RV^{(m)}$: 22 günlük ortalama. Uzun bellegi basit OLS ile yakalar. R2 ~ 0.40-0.65.
 
 ---
 **HAR-RV-J (Andersen, Bollerslev & Diebold, 2007):**
@@ -266,12 +266,12 @@ $$RV_t = \beta_0 + \beta_d BPV_{t-1} + \beta_w BPV_{t-1}^{(w)} + \beta_m BPV_{t-
 ---
 **HAR-RV-CJ (Andersen et al., 2007, JASA):**
 $$RV_t = \beta_0 + \beta_{cd}C_t + \beta_{cw}C_t^{(w)} + \beta_{cm}C_t^{(m)} + \beta_{jd}J_t + \varepsilon_t$$
-$C_t = BPV_t$ surekli yol bilesheni.
+$C_t = BPV_t$ sürekli yol bilesheni.
 
 ---
 **HEAVY (Shephard & Sheppard, 2010):**
 $$\sigma_t^2 = \omega + \alpha\cdot RV_{t-1} + \beta\cdot\sigma_{t-1}^2$$
-Gun-ici RV'yi dogrudan girdi olarak kullanir.
+Gun-ici RV'yi doğrudan girdi olarak kullanir.
 
 ---
 **GARCH-X:**
@@ -284,33 +284,33 @@ $$\ln\sigma_t^2 = \omega + \beta\ln\sigma_{t-1}^2 + \gamma\ln RV_{t-1}$$
 $$\ln RV_t = \xi + \phi\ln\sigma_t^2 + \tau_1 z_t + \tau_2(z_t^2-1) + u_t$$
 $\tau_1 < 0$: kaldirac etkisi.
 """)
-            st.markdown("**Model Karsilastirmasi:**")
+            st.markdown("**Model Karşılaştırması:**")
             st.dataframe(pd.DataFrame([
-                {"Model": "HAR-RV",         "Veri": "Gunluk RV",    "Sicrama": "Hayir", "Tipik R2": "0.40-0.60"},
-                {"Model": "HAR-RV-J",       "Veri": "RV + BPV",     "Sicrama": "Evet",  "Tipik R2": "0.45-0.65"},
-                {"Model": "HAR-RV-CJ",      "Veri": "RV + BPV",     "Sicrama": "Evet",  "Tipik R2": "0.45-0.65"},
-                {"Model": "HEAVY",          "Veri": "RV + Getiri",   "Sicrama": "Hayir", "Tipik R2": "-"},
-                {"Model": "GARCH-X",        "Veri": "RV + Getiri",   "Sicrama": "Hayir", "Tipik R2": "-"},
-                {"Model": "Realized GARCH", "Veri": "RV + Getiri",   "Sicrama": "Evet",  "Tipik R2": "-"},
+                {"Model": "HAR-RV",         "Veri": "Günlük RV",    "Sıçrama": "Hayir", "Tipik R2": "0.40-0.60"},
+                {"Model": "HAR-RV-J",       "Veri": "RV + BPV",     "Sıçrama": "Evet",  "Tipik R2": "0.45-0.65"},
+                {"Model": "HAR-RV-CJ",      "Veri": "RV + BPV",     "Sıçrama": "Evet",  "Tipik R2": "0.45-0.65"},
+                {"Model": "HEAVY",          "Veri": "RV + Getiri",   "Sıçrama": "Hayir", "Tipik R2": "-"},
+                {"Model": "GARCH-X",        "Veri": "RV + Getiri",   "Sıçrama": "Hayir", "Tipik R2": "-"},
+                {"Model": "Realized GARCH", "Veri": "RV + Getiri",   "Sıçrama": "Evet",  "Tipik R2": "-"},
             ]), hide_index=True, use_container_width=True)
 
         with col3:
-            st.markdown("#### Buyuk Boyut Kovaryans")
+            st.markdown("#### Büyük Boyut Kovaryans")
             st.markdown(r"""
 **Marchenko-Pastur Dagilimi:**
 $$\lambda_\pm = \sigma^2\!\left(1 \pm \sqrt{\kappa}\right)^2, \quad \kappa = N/T$$
-$[\lambda_-, \lambda_+]$: saf gurultu oz degerlerinin destek araligi.
-$\lambda > \lambda_+$ => sinyal oz degeri (gercek faktor).
-$\kappa$ buyudukce (N/T yukselince) gurultu daha shishar.
+$[\lambda_-, \lambda_+]$: saf gürültü oz değerlerinin destek araligi.
+$\lambda > \lambda_+$ => sinyal oz değeri (gerçek faktor).
+$\kappa$ buyudukce (N/T yukselince) gürültü daha shishar.
 
 ---
 **POET - Principal Orthogonal Complement Thresholding**
 *(Fan, Liao & Mincheva, 2013, Ann. Statist.):*
 $$\hat{\Sigma} = \hat{B}\hat{\Lambda}_k\hat{B}' + \hat{\Sigma}_u^{\mathcal{T}}$$
-1. PCA: ilk $k$ oz vektor ($\hat{B}$) + oz deger ($\hat{\Lambda}_k$)
+1. PCA: ilk $k$ oz vektor ($\hat{B}$) + oz değer ($\hat{\Lambda}_k$)
 2. Idiyosenkratik: $\hat{\Sigma}_u = \hat{\Sigma} - \hat{B}\hat{\Lambda}_k\hat{B}'$
 3. Yumusak esikleme: kucuk off-diag elemanlar sifirlanir
-4. $N > T$ durumunda dahi tutarli ve pozitif tanimli.
+4. $N > T$ durumunda dahi tutarlı ve pozitif tanimli.
 
 ---
 **Ledoit-Wolf Buzulme (2004, J. Multivar. Anal.):**
@@ -319,14 +319,14 @@ $\delta$: analitik optimal buzulme yogunlugu.
 
 **Dogrusal Olmayan LW (Oracle, 2020):**
 $$\hat{d}_i^{NL} = d_i / |\tilde{\mu}(d_i)|^2$$
-Her oz degeri ayri buzur (Stieltjes donusumu).
+Her oz değeri ayri buzur (Stieltjes donusumu).
 """)
-            st.markdown("**N/T oranina gore yontem secimi:**")
+            st.markdown("**N/T oranina göre yöntem secimi:**")
             st.dataframe(pd.DataFrame([
-                {"N/T": "< 0.10",    "Yontem": "Ornek Kovaryans", "Not": "Yeterli gozlem"},
-                {"N/T": "0.10-0.50", "Yontem": "Ledoit-Wolf",     "Not": "Iyi genel amacli"},
-                {"N/T": "0.50-1.00", "Yontem": "POET (k>=2)",     "Not": "Faktor yapisi var"},
-                {"N/T": "> 1.00",    "Yontem": "POET zorunlu",    "Not": "Ornek tekil"},
+                {"N/T": "< 0.10",    "Yöntem": "Ornek Kovaryans", "Not": "Yeterli gozlem"},
+                {"N/T": "0.10-0.50", "Yöntem": "Ledoit-Wolf",     "Not": "Iyi genel amacli"},
+                {"N/T": "0.50-1.00", "Yöntem": "POET (k>=2)",     "Not": "Faktor yapisi var"},
+                {"N/T": "> 1.00",    "Yöntem": "POET zorunlu",    "Not": "Ornek tekil"},
             ]), hide_index=True, use_container_width=True)
 
     # =========================================================================
@@ -340,15 +340,15 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
 
         col_a, col_b, col_c = st.columns([2, 3, 2])
         with col_a:
-            sig_asset = st.selectbox("Varlik", ac, key="sig_asset")
+            sig_asset = st.selectbox("Varlık", ac, key="sig_asset")
         with col_b:
             eta2_scale = st.slider(
-                "Gurultu/Sinyal Orani (eta2/IV)", 0.01, 0.50, 0.15, 0.01,
+                "Gürültü/Sinyal Orani (eta2/IV)", 0.01, 0.50, 0.15, 0.01,
                 key="sig_eta2",
-                help="Mikroyapi gurultusunun entegre varyansa orani. Yuksek => daha guclu U-sekli."
+                help="Mikroyapi gürültüsunun entegre varyansa orani. Yüksek => daha güçlü U-şekli."
             )
         with col_c:
-            show_iv = st.toggle("Gercek IV referans cizgisi", value=True, key="sig_show_iv")
+            show_iv = st.toggle("Gerçek IV referans cizgisi", value=True, key="sig_show_iv")
 
         sig_df = _cached_signature(eta2_scale, df_key)
 
@@ -358,18 +358,18 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
         if show_iv:
             fig_sig.add_hline(
                 y=iv_pct, line_dash="dot", line_color="#34d399", line_width=1.5,
-                annotation_text=f"Gercek IV ({iv_pct:.2f}%)",
+                annotation_text=f"Gerçek IV ({iv_pct:.2f}%)",
                 annotation_position="bottom right",
                 annotation_font_color="#34d399",
             )
         fig_sig.add_trace(go.Scatter(
             x=sig_df["freq_min"], y=sig_df["annualized_vol_pct"],
-            mode="lines+markers", name="Gozlemlenen RV (yillikl. %)",
+            mode="lines+markers", name="Gözlemlenen RV (yıllıkl. %)",
             line=dict(color=COLORS[0], width=2.5), marker=dict(size=7),
         ))
         fig_sig.add_trace(go.Scatter(
             x=sig_df["freq_min"], y=sig_df["noise_component_pct"],
-            mode="lines", name="Gurultu bilesheni",
+            mode="lines", name="Gürültü bilesheni",
             line=dict(color=COLORS[2], width=1.4, dash="dash"),
             fill="tozeroy", fillcolor="rgba(244,114,182,0.10)",
         ))
@@ -383,19 +383,19 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
             template=PLOT_TEMPLATE, height=380,
             title=f"Volatilite Imza Grafigi (eta2/IV = {eta2_scale:.2f})",
             xaxis_title="Ornekleme Araligi (dakika)",
-            yaxis_title="Yillikl. Oynaklk (%)",
+            yaxis_title="Yıllıkl. Oynaklık (%)",
             margin=dict(l=20, r=20, t=55, b=35),
             legend=dict(orientation="h", y=-0.20),
         )
         st.plotly_chart(fig_sig, use_container_width=True)
 
-        st.markdown("**Frekans Karsilastirma Tablosu**")
+        st.markdown("**Frekans Karşılaştırma Tablosu**")
         tbl = sig_df[["freq_min", "mean_rv", "annualized_vol_pct", "relative_bias_pct"]].copy()
-        tbl.columns = ["Frekans (dk)", "Ortalama RV", "Yillikl. Vol (%)", "Goreli Yanlilik (%)"]
+        tbl.columns = ["Frekans (dk)", "Ortalama RV", "Yıllıkl. Vol (%)", "Göreli Yanlılık (%)"]
         st.dataframe(tbl.style.format({
             "Ortalama RV": "{:.6f}",
-            "Yillikl. Vol (%)": "{:.3f}",
-            "Goreli Yanlilik (%)": "{:+.2f}",
+            "Yıllıkl. Vol (%)": "{:.3f}",
+            "Göreli Yanlılık (%)": "{:+.2f}",
         }), use_container_width=True, hide_index=True)
 
         st.divider()
@@ -411,14 +411,14 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
         ))
         fig_rv_ts.update_layout(
             template=PLOT_TEMPLATE, height=280,
-            title=f"Gerceklesen Oynaklk Zaman Serisi -- {sig_asset}",
-            xaxis_title="Tarih", yaxis_title="Yillikl. Oynaklk (%)",
+            title=f"Gerçekleşen Oynaklık Zaman Serisi -- {sig_asset}",
+            xaxis_title="Tarih", yaxis_title="Yıllıkl. Oynaklık (%)",
             margin=dict(l=20, r=20, t=50, b=30),
         )
         st.plotly_chart(fig_rv_ts, use_container_width=True)
 
         # Jump analysis
-        st.markdown("#### Sicrama Analizi")
+        st.markdown("#### Sıçrama Analizi")
         bpv_aligned = bpv_s.reindex(rv_s.index).fillna(rv_s)
         J_t = (rv_s - bpv_aligned).clip(lower=0)
         J_frac = (J_t / rv_s.replace(0, np.nan)).fillna(0)
@@ -434,12 +434,12 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
             ))
             fig_jt.add_trace(go.Bar(
                 x=J_t.index, y=J_t.values,
-                name="J_t (Sicrama)",
+                name="J_t (Sıçrama)",
                 marker_color="#f87171", opacity=0.80,
             ))
             fig_jt.update_layout(
                 template=PLOT_TEMPLATE, height=280,
-                title="Sicrama Bilesheni J_t = max(0, RV-BPV)",
+                title="Sıçrama Bilesheni J_t = max(0, RV-BPV)",
                 xaxis_title="Tarih", yaxis_title="Varyans",
                 margin=dict(l=20, r=20, t=50, b=30),
                 barmode="overlay",
@@ -455,7 +455,7 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
             ))
             fig_jfrac.update_layout(
                 template=PLOT_TEMPLATE, height=280,
-                title="Sicrama Payi (J_t / RV_t) - 22G Hareketli Ort.",
+                title="Sıçrama Payi (J_t / RV_t) - 22G Hareketli Ort.",
                 xaxis_title="Tarih", yaxis_title="J/RV (%)",
                 margin=dict(l=20, r=20, t=50, b=30),
             )
@@ -467,11 +467,11 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
 
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.markdown(_metric_card("Toplam Sicrama Gunu", str(total_jumps), "#f472b6"), unsafe_allow_html=True)
+            st.markdown(_metric_card("Toplam Sıçrama Gunu", str(total_jumps), "#f472b6"), unsafe_allow_html=True)
         with c2:
             st.markdown(_metric_card("Ortalama J/RV (%)", f"{mean_j_rv:.2f}", "#a78bfa"), unsafe_allow_html=True)
         with c3:
-            st.markdown(_metric_card("En Buyuk Sicrama Tarihi", max_j_date, "#fbbf24"), unsafe_allow_html=True)
+            st.markdown(_metric_card("En Büyük Sıçrama Tarihi", max_j_date, "#fbbf24"), unsafe_allow_html=True)
 
     # =========================================================================
     # TAB 3: HAR-RV Modeli
@@ -484,7 +484,7 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
 
         col_a, col_b, col_c = st.columns(3)
         with col_a:
-            har_asset = st.selectbox("Varlik", ac, key="har3_asset")
+            har_asset = st.selectbox("Varlık", ac, key="har3_asset")
         with col_b:
             har_model = st.selectbox(
                 "Model",
@@ -492,8 +492,8 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
                 key="har3_model",
             )
         with col_c:
-            forecast_horizon = st.slider("Ongorü Ufku (gun)", 1, 22, 5, key="har3_horizon")
-            st.caption(f"Secili ufuk: {forecast_horizon} gun")
+            forecast_horizon = st.slider("Öngörü Ufku (gün)", 1, 22, 5, key="har3_horizon")
+            st.caption(f"Secili ufuk: {forecast_horizon} gün")
 
         with st.spinner("Model tahmin ediliyor..."):
             res, dfm, rv_s, bpv_s = _cached_har(har_model, har_asset, df_key)
@@ -520,10 +520,10 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
         st.markdown("")
 
         params_df = pd.DataFrame({
-            "Katsayi": res.params,
+            "Katsayı": res.params,
             "Std. Hata": res.bse,
             "t-ist.": res.tvalues,
-            "p-degeri": res.pvalues,
+            "p-değeri": res.pvalues,
         }).round(6)
 
         def _color_pval(v):
@@ -537,16 +537,16 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
             except Exception:
                 return ""
 
-        st.markdown("**Katsayi Tablosu** (kirmizi => p<0.001, turuncu => p<0.05, yesil => anlaml degil)")
+        st.markdown("**Katsayı Tablosu** (kırmızı => p<0.001, turuncu => p<0.05, yesil => anlaml degil)")
         st.dataframe(
-            params_df.style.map(_color_pval, subset=["p-degeri"]),
+            params_df.style.map(_color_pval, subset=["p-değeri"]),
             use_container_width=True,
         )
 
         if har_model == "HAR-RV-CJ":
             st.info(
-                "HAR-RV-CJ: beta_cd/cw/cm surekli yol (BPV); beta_jd gunluk sicrama. "
-                "beta_jd anlamsizligi sicramalarin kalici olmadigini gosterir."
+                "HAR-RV-CJ: beta_cd/cw/cm sürekli yol (BPV); beta_jd günlük sıçrama. "
+                "beta_jd anlamsizligi sıçramalarin kalici olmadigini gosterir."
             )
 
         st.divider()
@@ -559,7 +559,7 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
         fig_fit = go.Figure()
         fig_fit.add_trace(go.Scatter(
             x=actual_y.index, y=actual_y.values,
-            mode="lines", name="Gercek RV",
+            mode="lines", name="Gerçek RV",
             line=dict(color="#60a5fa", width=1.0), opacity=0.75,
         ))
         fig_fit.add_trace(go.Scatter(
@@ -569,8 +569,8 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
         ))
         fig_fit.update_layout(
             template=PLOT_TEMPLATE, height=380,
-            title=f"Gercek RV vs. {har_model} Fitted -- {har_asset}",
-            xaxis_title="Tarih", yaxis_title="Gerceklesen Varyans",
+            title=f"Gerçek RV vs. {har_model} Fitted -- {har_asset}",
+            xaxis_title="Tarih", yaxis_title="Gerçekleşen Varyans",
             margin=dict(l=20, r=20, t=55, b=30),
             legend=dict(orientation="h", y=-0.18),
         )
@@ -601,22 +601,22 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
         )
         st.plotly_chart(fig_acf, use_container_width=True)
         st.caption(
-            "Kirmizi barlar 95% guven bandinin disinda -- kalikitilarda otokorelasyon var. "
+            "Kırmızı barlar 95% guven bandinin disinda -- kalikitilarda otokorelasyon var. "
             "HAC standart hatalar kullanmak onerilir (HAR-RV HAC secenegi)."
         )
 
     # =========================================================================
-    # TAB 4: Yuksek Frekansli Modeller
+    # TAB 4: Yüksek Frekanslı Modeller
     # =========================================================================
     with tab_hf:
-        st.markdown("### Yuksek Frekansli Oynaklk Modelleri")
+        st.markdown("### Yüksek Frekanslı Oynaklık Modelleri")
         df = st.session_state.returns_df
         ac = _asset_cols(df)
         df_key = id(df)
 
         col_a, col_b = st.columns([2, 3])
         with col_a:
-            hf_asset = st.selectbox("Varlik", ac, key="hf_asset")
+            hf_asset = st.selectbox("Varlık", ac, key="hf_asset")
         with col_b:
             selected_models = st.multiselect(
                 "Modeller",
@@ -680,15 +680,15 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
         ))
         fig_hf.update_layout(
             template=PLOT_TEMPLATE, height=380,
-            title=f"Kosullu Oynaklk Karsilastirmasi -- {hf_asset} (yillikl. %)",
-            xaxis_title="Tarih", yaxis_title="Yillikl. Oynaklk (%)",
+            title=f"Koşullu Oynaklık Karşılaştırması -- {hf_asset} (yıllıkl. %)",
+            xaxis_title="Tarih", yaxis_title="Yıllıkl. Oynaklık (%)",
             margin=dict(l=20, r=20, t=55, b=35),
             legend=dict(orientation="h", y=-0.22),
         )
         st.plotly_chart(fig_hf, use_container_width=True)
 
         # Comparison table
-        st.markdown("**Model Karsilastirma Tablosu**")
+        st.markdown("**Model Karşılaştırma Tablosu**")
         rows_cmp = []
         for mname, r in model_results.items():
             pers = r.get("persistence", float("nan"))
@@ -706,7 +706,7 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
             rows_cmp.append({
                 "Model": mname,
                 "Kalicilik (a+b)": f"{pers:.4f}" if not (isinstance(pers, float) and pers != pers) else "-",
-                "Yari-Omur (gun)": f"{hl:.1f}" if hl != float("inf") and hl == hl else "inf",
+                "Yarı-Ömür (gün)": f"{hl:.1f}" if hl != float("inf") and hl == hl else "inf",
                 "Log-lik": f"{loglik:,.1f}" if loglik == loglik else "-",
                 "Parametre Notu": note,
             })
@@ -740,7 +740,7 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
                 cmp = f"GARCH: {p_g:.3f} vs HEAVY: {p_h:.3f}" if p_g else f"Kalicilik: {p_h:.3f}"
                 st.markdown(_insight_card(
                     f"<strong>HEAVY Modeli</strong><br>{cmp}<br>"
-                    "RV'yi dogrudan kullanan HEAVY, GARCH'a gore yeni oynaklk bilgisine daha hizli tepki verir.",
+                    "RV'yi doğrudan kullanan HEAVY, GARCH'a göre yeni oynaklk bilgisine daha hızlı tepki verir.",
                     COLORS[0]
                 ), unsafe_allow_html=True)
         with ic2:
@@ -761,15 +761,15 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
                 tau_str = f"{tau1:.3f}" if tau1 == tau1 else "NaN"
                 st.markdown(_insight_card(
                     f"<strong>Realized GARCH</strong><br>tau1={tau_str} => {lev}<br>"
-                    "Iki denklemli sistem: olcum hatasini ve asimetriyi birlikte modeller.",
+                    "İki denklemli sistem: ölçüm hatasini ve asimetriyi birlikte modeller.",
                     COLORS[2]
                 ), unsafe_allow_html=True)
 
     # =========================================================================
-    # TAB 5: Buyuk Boyut Kovaryans
+    # TAB 5: Büyük Boyut Kovaryans
     # =========================================================================
     with tab_cov:
-        st.markdown("### Buyuk Boyut Kovaryans Tahmini")
+        st.markdown("### Büyük Boyut Kovaryans Tahmini")
         df = st.session_state.returns_df
         ac = _asset_cols(df)
         max_n = min(len(ac), 8)
@@ -777,7 +777,7 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
 
         col_a, col_b, col_c = st.columns(3)
         with col_a:
-            n_assets_cov = st.slider("Varlik Sayisi", 2, max_n, min(5, max_n), key="cov5_n")
+            n_assets_cov = st.slider("Varlık Sayisi", 2, max_n, min(5, max_n), key="cov5_n")
         with col_b:
             k_max = max(1, n_assets_cov - 1)
             k_factors = st.slider("Faktor Sayisi (POET)", 1, k_max, min(3, k_max), key="cov5_k")
@@ -804,7 +804,7 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
         )
 
         # Marchenko-Pastur eigenvalue plot
-        st.markdown("#### Marchenko-Pastur Siniri & Oz Deger Spektrumu")
+        st.markdown("#### Marchenko-Pastur Sınıri & Oz Değer Spektrumu")
         eig_colors = [
             "#a78bfa" if v > mp_info["lambda_plus"] else "#6b7280"
             for v in eigs_corr
@@ -814,11 +814,11 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
             x=list(range(1, n_assets_cov + 1)), y=list(eigs_corr),
             mode="markers",
             marker=dict(color=eig_colors, size=12, symbol="circle"),
-            name="Oz Degerler",
+            name="Oz Değerler",
         ))
         fig_mp.add_hline(
             y=mp_info["lambda_plus"], line_dash="dash", line_color="#fbbf24", line_width=2,
-            annotation_text=f"lambda+ = {mp_info['lambda_plus']:.3f} (MP ust sinir)",
+            annotation_text=f"lambda+ = {mp_info['lambda_plus']:.3f} (MP ust sınır)",
             annotation_position="top right", annotation_font_color="#fbbf24",
         )
         fig_mp.add_hline(
@@ -828,8 +828,8 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
         )
         fig_mp.update_layout(
             template=PLOT_TEMPLATE, height=380,
-            title=f"Korelasyon Matrisi Oz Degerleri -- {n_signal} sinyal (mor), {n_noise} gurultu (gri)",
-            xaxis_title="Oz Deger Sirasi", yaxis_title="Oz Deger Buyuklugu",
+            title=f"Korelasyon Matrisi Oz Değerleri -- {n_signal} sinyal (mor), {n_noise} gürültü (gri)",
+            xaxis_title="Oz Değer Sirasi", yaxis_title="Oz Değer Büyüklugu",
             margin=dict(l=20, r=20, t=55, b=35),
         )
         st.plotly_chart(fig_mp, use_container_width=True)
@@ -857,7 +857,7 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
             )
         fig_heat.update_layout(
             template=PLOT_TEMPLATE, height=380,
-            title="Korelasyon Matrisi Karsilastirmasi",
+            title="Korelasyon Matrisi Karşılaştırması",
             margin=dict(l=20, r=20, t=60, b=30),
         )
         st.plotly_chart(fig_heat, use_container_width=True)
@@ -876,23 +876,23 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
         st.dataframe(pd.DataFrame(rows_cond), use_container_width=True, hide_index=True)
 
         # LW eigenvalue shrinkage visualization
-        st.markdown("**Ledoit-Wolf Buzulme: Oz Deger Karsilastirmasi**")
+        st.markdown("**Ledoit-Wolf Buzulme: Oz Değer Karşılaştırması**")
         eigs_sample_cov = np.sort(np.linalg.eigvalsh(sample_cov))[::-1]
         eigs_lw_cov = np.sort(np.linalg.eigvalsh(lw_cov_mat))[::-1]
         idx_r = list(range(1, n_assets_cov + 1))
         fig_shrink = go.Figure()
         fig_shrink.add_trace(go.Bar(
             x=idx_r, y=list(eigs_sample_cov),
-            name="Ornek Oz Degerleri", marker_color=COLORS[3], opacity=0.7,
+            name="Ornek Oz Değerleri", marker_color=COLORS[3], opacity=0.7,
         ))
         fig_shrink.add_trace(go.Bar(
             x=idx_r, y=list(eigs_lw_cov),
-            name="LW Buzulmus Oz Degerleri", marker_color=COLORS[0], opacity=0.85,
+            name="LW Buzulmus Oz Değerleri", marker_color=COLORS[0], opacity=0.85,
         ))
         fig_shrink.update_layout(
             template=PLOT_TEMPLATE, height=280,
-            title=f"Oz Deger Buzulmesi -- delta = {shrinkage:.4f}",
-            xaxis_title="Oz Deger Sirasi", yaxis_title="Buyukluk",
+            title=f"Oz Değer Buzulmesi -- delta = {shrinkage:.4f}",
+            xaxis_title="Oz Değer Sirasi", yaxis_title="Büyükluk",
             barmode="group", margin=dict(l=20, r=20, t=50, b=30),
         )
         st.plotly_chart(fig_shrink, use_container_width=True)
@@ -901,7 +901,7 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
     # TAB 6: Entegre Analiz: HAR + POET MVP
     # =========================================================================
     with tab_integrated:
-        st.markdown("### Entegre Analiz: HAR-RV + Buyuk Boyut Kovaryans + MVP Portfoy")
+        st.markdown("### Entegre Analiz: HAR-RV + Büyük Boyut Kovaryans + MVP Portföy")
         df = st.session_state.returns_df
         ac = _asset_cols(df)
         max_n6 = min(len(ac), 8)
@@ -909,7 +909,7 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
 
         col_a, col_b, col_c = st.columns(3)
         with col_a:
-            n_int = st.slider("Varlik Sayisi", 3, max_n6, min(5, max_n6), key="int_n")
+            n_int = st.slider("Varlık Sayisi", 3, max_n6, min(5, max_n6), key="int_n")
         with col_b:
             har_choice = st.selectbox("HAR Modeli", ["HAR-RV", "HAR-RV-J"], key="int_har")
         with col_c:
@@ -919,25 +919,25 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
 
         # Step cards
         st.markdown(_step_card(1, "HAR-RV ile Volatilite Tahmini",
-            f"Her varlik icin {har_choice} modeli tahmin edilir; R2, beta_d, beta_w, beta_m gosterilir."),
+            f"Her varlık için {har_choice} modeli tahmin edilir; R2, beta_d, beta_w, beta_m gosterilir."),
             unsafe_allow_html=True)
         st.markdown(_step_card(2, "Kovaryans Matrisi Tahmini",
-            f"Secili yontem: {cov_choice}. Gunluk getiriler kullanilir."),
+            f"Secili yöntem: {cov_choice}. Günlük getiriler kullanilir."),
             unsafe_allow_html=True)
-        st.markdown(_step_card(3, "MVP Agirliklari",
-            "w = Sigma^-1 * 1 / (1' * Sigma^-1 * 1) -- minimum varyans portfoy."),
+        st.markdown(_step_card(3, "MVP Ağırlıkları",
+            "w = Sigma^-1 * 1 / (1' * Sigma^-1 * 1) -- minimum varyans portföy."),
             unsafe_allow_html=True)
-        st.markdown(_step_card(4, "Portfoy VaR/ES",
-            "Portfoy getirilerinden normal VaR ve ES hesaplanir."),
+        st.markdown(_step_card(4, "Portföy VaR/ES",
+            "Portföy getirilerinden normal VaR ve ES hesaplanır."),
             unsafe_allow_html=True)
-        st.markdown(_step_card(5, "Geriye Donuk Degerlendirme",
-            "Esit agirlik, Ornek-MVP, POET-MVP, LW-MVP portfoyleri karsilastirilir."),
+        st.markdown(_step_card(5, "Geriye Donuk Değerlendirme",
+            "Eşit ağırlık, Ornek-MVP, POET-MVP, LW-MVP portföyleri karşılaştırılır."),
             unsafe_allow_html=True)
 
         st.divider()
 
         # Step 1: HAR summaries
-        st.markdown("#### Adim 1 -- HAR-RV Ozet")
+        st.markdown("#### Adım 1 -- HAR-RV Özet")
         har_rows = []
         with st.spinner("HAR modelleri tahmin ediliyor..."):
             for ast in int_assets:
@@ -945,21 +945,21 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
                     res_h, _, _, _ = _cached_har(har_choice, ast, df_key)
                     p = res_h.params
                     har_rows.append({
-                        "Varlik": ast,
+                        "Varlık": ast,
                         "R2": f"{res_h.rsquared:.4f}",
                         "beta_0 (sabit)": f"{float(p.iloc[0]):.6f}",
-                        "beta_d (gunluk)": f"{float(p.iloc[1]):.4f}",
+                        "beta_d (günlük)": f"{float(p.iloc[1]):.4f}",
                         "beta_w (haftalik)": f"{float(p.iloc[2]):.4f}",
                         "beta_m (aylik)": f"{float(p.iloc[3]):.4f}" if len(p) > 3 else "-",
                     })
                 except Exception as e:
-                    har_rows.append({"Varlik": ast, "R2": f"Hata: {e}"})
+                    har_rows.append({"Varlık": ast, "R2": f"Hata: {e}"})
         st.dataframe(pd.DataFrame(har_rows), use_container_width=True, hide_index=True)
 
         # Step 2-3: Covariance + MVP weights
-        st.markdown("#### Adim 2-3 -- Kovaryans & MVP Agirliklari")
+        st.markdown("#### Adım 2-3 -- Kovaryans & MVP Ağırlıkları")
         k_int = min(3, n_int - 1)
-        with st.spinner("Kovaryans & MVP agirliklar..."):
+        with st.spinner("Kovaryans & MVP ağırlıklar..."):
             (
                 sample_cov_i, poet_cov_i, lw_cov_i,
                 shrink_i, cols_i, returns_sub_i, _,
@@ -982,18 +982,18 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
         ))
         fig_w.add_hline(
             y=1.0 / n_int, line_dash="dot", line_color="#94a3b8",
-            annotation_text="Esit agirlik", annotation_font_color="#94a3b8"
+            annotation_text="Eşit ağırlık", annotation_font_color="#94a3b8"
         )
         fig_w.update_layout(
             template=PLOT_TEMPLATE, height=280,
-            title=f"MVP Agirliklari -- {cov_choice}",
-            xaxis_title="Varlik", yaxis_title="Agirlik",
+            title=f"MVP Ağırlıkları -- {cov_choice}",
+            xaxis_title="Varlık", yaxis_title="Ağırlık",
             margin=dict(l=20, r=20, t=50, b=30),
         )
         st.plotly_chart(fig_w, use_container_width=True)
 
         # Step 4-5: Portfolio comparison
-        st.markdown("#### Adim 4-5 -- Portfoy Performans Karsilastirmasi")
+        st.markdown("#### Adım 4-5 -- Portföy Performans Karşılaştırması")
 
         def _port_metrics(w_arr, ret_mat):
             pr = ret_mat @ w_arr
@@ -1021,7 +1021,7 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
         w_eq = np.full(n_int, 1.0 / n_int)
 
         for pname, pcov in [
-            ("Esit Agirlik", None),
+            ("Eşit Ağırlık", None),
             ("Ornek-MVP",    sample_cov_i),
             ("POET-MVP",     poet_cov_i),
             ("LW-MVP",       lw_cov_i),
@@ -1035,14 +1035,14 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
                 except np.linalg.LinAlgError:
                     w_p = w_eq.copy()
             m_metrics = _port_metrics(w_p, rets_np)
-            port_rows.append({"Portfoy": pname, **m_metrics})
+            port_rows.append({"Portföy": pname, **m_metrics})
             port_series_dict[pname] = rets_np @ w_p
 
         st.dataframe(pd.DataFrame(port_rows), use_container_width=True, hide_index=True)
 
         # Cumulative return chart
         PORT_COLORS = {
-            "Esit Agirlik": "#94a3b8",
+            "Eşit Ağırlık": "#94a3b8",
             "Ornek-MVP":    COLORS[3],
             "POET-MVP":     COLORS[0],
             "LW-MVP":       COLORS[1],
@@ -1058,13 +1058,13 @@ Her oz degeri ayri buzur (Stieltjes donusumu).
             ))
         fig_cum.update_layout(
             template=PLOT_TEMPLATE, height=380,
-            title="Kumulatif Getiri Karsilastirmasi (Statik MVP Agirliklari)",
+            title="Kumulatif Getiri Karşılaştırması (Statik MVP Ağırlıkları)",
             xaxis_title="Tarih", yaxis_title="Kumulatif Getiri (1 = baslangic)",
             margin=dict(l=20, r=20, t=55, b=35),
             legend=dict(orientation="h", y=-0.22),
         )
         st.plotly_chart(fig_cum, use_container_width=True)
         st.caption(
-            "Not: Agirliklar statik olup tum donem kovaryansina dayanir. "
-            "Gercekci bir backtest icin kayan pencere yeniden dengeleme gereklidir."
+            "Not: Ağırlıklar statik olup tum dönem kovaryansina dayanir. "
+            "Gerçekci bir backtest için kayan pencere yeniden dengeleme gereklidir."
         )
