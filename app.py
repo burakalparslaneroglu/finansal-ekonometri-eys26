@@ -1,3 +1,5 @@
+##################################################################
+
 """
 Uygulamalı Finansal Ekonometri — İnteraktif Öğretim Uygulaması
 EYS'26 — Pamukkale Üniversitesi
@@ -82,12 +84,27 @@ st.markdown("""
 # Data loading — path-independent
 # ---------------------------------------------------------------------------
 DATA_PATH = Path(__file__).parent / "data" / "sample_returns.csv"
+META_PATH = Path(__file__).parent / "data" / "sample_meta.json"
 
 
 @st.cache_data(show_spinner=False)
 def load_default_data() -> pd.DataFrame:
     """Load the bundled sample dataset. Cached so it is read only once."""
     return pd.read_csv(DATA_PATH, index_col=0, parse_dates=True)
+
+
+@st.cache_data(show_spinner=False)
+def load_crisis_window():
+    """Kriz penceresi meta-verisi (varsa) -> (start, end) Timestamp; yoksa None."""
+    import json
+    try:
+        meta = json.loads(META_PATH.read_text())
+        cw = meta.get("crisis_window")
+        if cw:
+            return (pd.Timestamp(cw[0]), pd.Timestamp(cw[1]))
+    except Exception:
+        return None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +126,7 @@ with st.sidebar:
     st.markdown("**Veri**")
 
     use_custom = st.checkbox("Kendi verinizi yükleyin", value=False)
+    _custom_ok = False
     if use_custom:
         uploaded = st.file_uploader(
             "CSV yükle (tarih index, getiri sütunlar)",
@@ -119,6 +137,7 @@ with st.sidebar:
             try:
                 df_uploaded = pd.read_csv(uploaded, index_col=0, parse_dates=True)
                 st.session_state.returns_df = df_uploaded
+                _custom_ok = True
                 st.success(f"Yuklendi: {df_uploaded.shape[0]} satir, {df_uploaded.shape[1]} sutun")
             except Exception as exc:
                 st.error(f"CSV okunamadi: {exc}")
@@ -127,6 +146,10 @@ with st.sidebar:
             st.session_state.returns_df = load_default_data()
     else:
         st.session_state.returns_df = load_default_data()
+
+    # Kriz penceresi: yalnızca paketlenmiş varsayılan veri için meta'dan yükle;
+    # kullanıcı verisinde None -> tab_day3 otomatik stres-penceresi tespitine düşer.
+    st.session_state["crisis_window"] = None if _custom_ok else load_crisis_window()
 
     # Data info
     df_info = st.session_state.returns_df
@@ -182,3 +205,6 @@ elif day == "4. Gün — Risk Ölçütleri & Backtest":
 elif day == "5. Gün — Gerçekleşen Oynaklık & Büyük Boyut":
     from tabs import tab_day5
     tab_day5.render()
+
+
+##################################################################

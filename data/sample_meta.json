@@ -1,0 +1,25 @@
+{
+  "crisis_window": [
+    "2020-02-18",
+    "2020-04-07"
+  ],
+  "seed": 20260729,
+  "T": 1500,
+  "assets": [
+    "BANKA",
+    "SANAYI",
+    "HOLD",
+    "GAYRIM",
+    "TEKNOLOJI",
+    "ENERJI",
+    "PERAK",
+    "OTOMOT"
+  ],
+  "dgp": "ADCC + crisis + Student-t",
+  "adcc_true": {
+    "a": 0.04,
+    "b": 0.93,
+    "c": 0.03,
+    "nu": 7.0
+  }
+}
