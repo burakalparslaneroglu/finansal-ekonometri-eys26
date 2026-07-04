@@ -15,13 +15,35 @@ from scipy.stats import norm, genpareto
 import warnings
 
 PLOT_TEMPLATE = "plotly_dark"
-COLORS = ["#a78bfa", "#34d399", "#f472b6", "#60a5fa", "#fbbf24", "#fb923c"]
+# Renk-korlugune-guvenli qualitative palet (Okabe & Ito 2008); koyu temada gorunur.
+COLORS = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999"]
 COLORS_METHOD = {
-    "Normal":         "#a78bfa",
-    "Student-t":      "#34d399",
-    "Hist.Sim.":      "#f472b6",
-    "Cornish-Fisher": "#fbbf24",
+    "Normal":         "#E69F00",
+    "Student-t":      "#56B4E9",
+    "Hist.Sim.":      "#CC79A7",
+    "Cornish-Fisher": "#009E73",
+    "GARCH-Normal":   "#0072B2",
 }
+
+
+def _stress_window(index, returns_values):
+    """Sekillerde golgelemek icin stres penceresi (start, end) tarihleri.
+
+    Once st.session_state['crisis_window'] (DGP meta-verisi) denenir; yoksa
+    kesitsel ortalama |getiri| yumusatilmis tepesi etrafinda otomatik tespit.
+    """
+    cw = st.session_state.get("crisis_window", None)
+    if cw is not None:
+        return cw
+    v = np.asarray(returns_values)
+    m = np.abs(v).mean(axis=1) if v.ndim == 2 else np.abs(v)
+    k = 5
+    ms = np.convolve(m, np.ones(k) / k, mode="same")
+    pk = int(np.argmax(ms))
+    half = 18
+    a = max(0, pk - half)
+    b = min(len(index) - 1, pk + half)
+    return (index[a], index[b])
 
 
 def _asset_cols(df):
@@ -150,7 +172,8 @@ def compute_rolling_covar(asset_i, market_proxy, alpha, roll_win, df_key):
 @st.cache_data(show_spinner=False)
 def compute_fz_comparison(asset, alpha, n_oos, df_key):
     from risk_metrics import (calculate_var_es, calculate_cornish_fisher_var,
-                               fissler_ziegel_loss)
+                               fissler_ziegel_loss, min_score_combine,
+                               relative_score_combine)
     df = st.session_state.returns_df
     returns = df[asset].dropna().values
     n = len(returns)
@@ -204,9 +227,40 @@ def compute_fz_comparison(asset, alpha, n_oos, df_key):
             fz_losses[m] = fissler_ziegel_loss(oos_returns[mask], v_arr[mask], e_arr[mask], alpha)
             var_means[m] = float(np.mean(v_arr[mask]))
             es_means[m]  = float(np.mean(e_arr[mask]))
+    # --- Taylor (2020) combining of the valid methods (reference = Hist.Sim.) ---
+    ref = "Hist.Sim."
+    comb_methods = [m for m in ["Normal", "Student-t", "Cornish-Fisher", "GARCH-Normal"]
+                    if m in var_fcs and np.isfinite(var_fcs[m]).sum() >= 0.8 * n_oos]
+    cm_mask = np.ones(n_oos, dtype=bool)
+    for m in comb_methods + [ref]:
+        cm_mask &= np.isfinite(var_fcs[m]) & np.isfinite(es_fcs[m])
+    combining = {"ref": ref, "ok": False}
+    if len(comb_methods) >= 2 and cm_mask.sum() >= 30:
+        y = oos_returns[cm_mask]
+        Vm = np.column_stack([var_fcs[m][cm_mask] for m in comb_methods])
+        Em = np.column_stack([es_fcs[m][cm_mask] for m in comb_methods])
+        vc, ec, wQ, wS = min_score_combine(y, Vm, Em, alpha)
+        vr, er, w_rel, lam = relative_score_combine(y, Vm, Em, alpha)
+        vs_, es_ = Vm.mean(1), Em.mean(1)
+        ref_fz = fissler_ziegel_loss(y, var_fcs[ref][cm_mask], es_fcs[ref][cm_mask], alpha)
+
+        def _skill(vv, ee):
+            return (fissler_ziegel_loss(y, vv, ee, alpha) / ref_fz - 1.0) * 100.0
+
+        combining = {
+            "ref": ref, "ok": True, "methods": comb_methods,
+            "n_valid": int(cm_mask.sum()),
+            "indiv_skill": {m: _skill(var_fcs[m][cm_mask], es_fcs[m][cm_mask])
+                            for m in comb_methods},
+            "combo_skill": {"Basit ort.": _skill(vs_, es_),
+                            "Göreli-skor": _skill(vr, er),
+                            "Min-skor": _skill(vc, ec)},
+            "wQ": wQ, "wS": wS, "w_rel": w_rel, "lam": float(lam),
+        }
+
     return {
         "fz": fz_losses, "var_mean": var_means, "es_mean": es_means,
-        "var_fcs": var_fcs, "es_fcs": es_fcs,
+        "var_fcs": var_fcs, "es_fcs": es_fcs, "combining": combining,
         "oos_returns": oos_returns, "oos_idx": df.index[-n_oos:],
     }
 
@@ -770,12 +824,16 @@ Düşük FZ kaybı → daha iyi model.
             oos_idx = fz_res["oos_idx"]
             oos_ret = fz_res["oos_returns"]
             var_fcs = fz_res["var_fcs"]
+            stress = _stress_window(df.index, df[all_cols].values)
             fig_ov = go.Figure()
+            fig_ov.add_vrect(x0=stress[0], x1=stress[1], fillcolor="gray",
+                             opacity=0.15, line_width=0, annotation_text="stres",
+                             annotation_position="top left")
             fig_ov.add_trace(go.Scatter(
                 x=oos_idx, y=oos_ret, mode="lines", name="Getiri",
-                line=dict(color="rgba(96,165,250,0.4)", width=0.8),
+                line=dict(color="rgba(150,150,150,0.5)", width=0.8),
             ))
-            clrs_top = ["#34d399", "#f472b6"]
+            clrs_top = ["#009E73", "#CC79A7"]
             for ci, m in enumerate(top2):
                 v_arr = var_fcs[m]
                 n_plot = min(len(oos_idx), len(v_arr))
@@ -792,6 +850,52 @@ Düşük FZ kaybı → daha iyi model.
                 legend=dict(orientation="h", y=-0.3),
             )
             st.plotly_chart(fig_ov, use_container_width=True)
+
+            # ---- Taylor (2020) VaR/ES kombinasyonu ----
+            comb = fz_res["combining"]
+            st.markdown("#### Taylor (2020) Kombinasyonu (VaR ve ES)")
+            if not comb.get("ok"):
+                st.info("Kombinasyon icin yeterli gecerli yontem/gozlem yok "
+                        "(en az 2 yontem, 30 gozlem gerekli).")
+            else:
+                st.caption(
+                    "FZ/AL ortak skoruyla birlestirme (min-skor: VaR + spacing ayri konveks "
+                    f"agirliklar; goreli-skor: softmax). Beceri skoru {comb['ref']} referansina "
+                    f"gore (%, yuksek = iyi; {comb['n_valid']} gecerli gun)."
+                )
+                labels = comb["methods"] + list(comb["combo_skill"].keys())
+                vals = ([comb["indiv_skill"][m] for m in comb["methods"]]
+                        + [comb["combo_skill"][c] for c in comb["combo_skill"]])
+                is_combo = [False] * len(comb["methods"]) + [True] * len(comb["combo_skill"])
+                bar_c = ["#0072B2" if c else "#999999" for c in is_combo]
+                fig_cmb = go.Figure(go.Bar(
+                    x=labels, y=vals, marker_color=bar_c,
+                    text=[f"{v:.2f}" for v in vals], textposition="auto",
+                ))
+                fig_cmb.update_layout(
+                    template=PLOT_TEMPLATE,
+                    title=f"AL Beceri Skoru: bireysel (gri) vs kombinasyon (mavi) — {asset_f}",
+                    yaxis_title=f"AL beceri skoru (%, {comb['ref']}'e gore)",
+                    height=340, margin=dict(l=20, r=20, t=50, b=30),
+                )
+                st.plotly_chart(fig_cmb, use_container_width=True)
+                wdf = pd.DataFrame({
+                    "Yontem": comb["methods"],
+                    "Min-skor w^Q": [f"{x:.2f}" for x in comb["wQ"]],
+                    "Min-skor w^S (spacing)": [f"{x:.2f}" for x in comb["wS"]],
+                    "Goreli-skor w": [f"{x:.2f}" for x in comb["w_rel"]],
+                })
+                st.dataframe(wdf, use_container_width=True, hide_index=True)
+                best_combo = max(comb["combo_skill"], key=comb["combo_skill"].get)
+                best_indiv = max(comb["indiv_skill"], key=comb["indiv_skill"].get)
+                if comb["combo_skill"][best_combo] > comb["indiv_skill"][best_indiv]:
+                    st.caption(f"Bu seride en iyi kombinasyon (**{best_combo}**) en iyi bireyseli "
+                               f"(**{best_indiv}**) geciyor. Kombinasyon avantaji tipik olarak "
+                               "cok-seri ortalamasinda belirginlesir (Taylor 2020).")
+                else:
+                    st.caption(f"Bu seride en iyi bireysel (**{best_indiv}**) kombinasyonu geciyor; "
+                               "kombinasyon avantaji cok-seri ortalamasinda belirginlesir (Taylor 2020).")
+
             st.success(f"**En iyi model:** {best} (FZ Kaybı = {fz[best]:.6f})")
 
 
@@ -838,19 +942,23 @@ Düşük FZ kaybı → daha iyi model.
         viol_idx = idx_oos[hits]
 
         # İhlal grafiği
+        stress = _stress_window(df.index, df[all_cols].values)
         fig_viol = go.Figure()
+        fig_viol.add_vrect(x0=stress[0], x1=stress[1], fillcolor="gray",
+                           opacity=0.15, line_width=0, annotation_text="stres",
+                           annotation_position="top left")
         fig_viol.add_trace(go.Scatter(
             x=idx_oos, y=ret_oos, mode="lines", name="Günlük Getiri",
-            line=dict(color="rgba(96,165,250,0.5)", width=0.8),
+            line=dict(color="rgba(150,150,150,0.55)", width=0.8),
         ))
         fig_viol.add_trace(go.Scatter(
             x=idx_oos, y=-var_oos, mode="lines",
             name=f"VaR — {method_b}",
-            line=dict(color="#a78bfa", width=1.6, dash="dash"),
+            line=dict(color=COLORS_METHOD.get(method_b, "#E69F00"), width=1.6, dash="dash"),
         ))
         fig_viol.add_trace(go.Scatter(
             x=viol_idx, y=ret_oos[hits], mode="markers", name="İhlal",
-            marker=dict(color="#f87171", size=7, symbol="circle"),
+            marker=dict(color="#D55E00", size=7, symbol="circle"),
         ))
         fig_viol.update_layout(
             template=PLOT_TEMPLATE,
@@ -916,10 +1024,14 @@ Düşük FZ kaybı → daha iyi model.
              "İstatistik": _fs(bt["independence_stat"]),
              "p-değeri": _fs(bt["independence_pvalue"]),
              "Sonuç": _pr(bt["independence_pvalue"])},
-            {"Test": "Acerbi-Szekely Z₁ (ES)",
+            {"Test": "Acerbi-Szekely Z₁ (koşullu magnitüd, N_T)",
              "İstatistik": _fs(es_bt["z1_stat"]),
-             "p-değeri": _fs(es_bt["pvalue"]),
-             "Sonuç": _pr(es_bt["pvalue"])},
+             "p-değeri": _fs(es_bt["z1_pvalue"]),
+             "Sonuç": _pr(es_bt["z1_pvalue"])},
+            {"Test": "Acerbi-Szekely Z₂ (sıklık + magnitüd, Nα)",
+             "İstatistik": _fs(es_bt["z2_stat"]),
+             "p-değeri": _fs(es_bt["z2_pvalue"]),
+             "Sonuç": _pr(es_bt["z2_pvalue"])},
             {"Test": "Berkowitz PIT (Ljung-Box)",
              "İstatistik": _fs(berk["pit_acf1"]),
              "p-değeri": _fs(berk["lb_pvalue_level"]),
@@ -969,6 +1081,7 @@ Düşük FZ kaybı → daha iyi model.
         st.markdown(
             "**Kupiec POF:** İhlal oranının beklenen α düzeyine eşit olup olmadığını test eder.  \n"
             "**Christoffersen:** İhlallerin zaman içinde bağımsız dağılıp dağılmadığını test eder.  \n"
-            "**Acerbi-Szekely Z₁:** ES modelinin kuyruk kayıplarını doğru tahmin edip etmediğini test eder.  \n"
+            "**Acerbi-Szekely Z₁/Z₂:** ES'nin doğruluğunu test eder — Z₁ ihlal *sayısına* "
+            "(N_T) koşulludur (yalnızca magnitüd), Z₂ ise sıklığı da içerir (Nα ile normalize).  \n"
             "**Berkowitz PIT:** Tam dağılımın doğruluğunu Olasılık İntegral Dönüşümü (PIT) ile test eder."
         )

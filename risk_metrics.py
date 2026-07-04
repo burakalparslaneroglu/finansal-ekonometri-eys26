@@ -1,3 +1,5 @@
+##################################################################
+
 import numpy as np
 import pandas as pd
 from scipy.stats import norm, t
@@ -172,80 +174,67 @@ def backtest_var(returns, var_forecasts, alpha=0.05):
 
 def backtest_es_acerbi_szekely(returns, var_forecasts, es_forecasts, alpha=0.05):
     """
-    Acerbi-Szekely (2014) ES backtest (Z1 statistic).
-    Z1 is defined as:
-    Z1 = sum_{t=1}^N ( (L_t * I_t) / (alpha * ES_t) ) / N - 1
-    where I_t = 1 if L_t > VaR_t, and L_t is loss.
-    Under the null hypothesis, E[Z1] = 0. A highly negative value indicates risk underestimation.
-    returns: 1D array of returns
-    var_forecasts: 1D array of VaR forecasts
-    es_forecasts: 1D array of ES forecasts
+    Acerbi-Szekely (2014) ES backtests, CORRECTED.
+      Z1: conditional-magnitude test, normalized by the VIOLATION COUNT N_T = sum I_t
+          Z1 = (1/N_T) * sum_t ( L_t I_t / ES_t ) - 1
+      Z2: frequency+magnitude test, normalized by N*alpha (expected # violations)
+          Z2 = (1/(N*alpha)) * sum_t ( L_t I_t / ES_t ) - 1
+    Under H0, E[Z1]=E[Z2]=0; strongly negative => risk underestimation.
+    (The previous implementation labeled Z2 as 'Z1'.)
     """
     losses = -np.asarray(returns)
     var_forecasts = np.asarray(var_forecasts)
-    es_forecasts = np.asarray(es_forecasts)
-    
-    hits = (losses > var_forecasts).astype(int)
-    
-    # Prevent division by zero
-    es_forecasts = np.clip(es_forecasts, 1e-6, None)
-    
-    # Z1 statistic
-    z1_terms = (losses * hits) / (alpha * es_forecasts)
-    z1_stat = np.mean(z1_terms) - 1.0
-    
-    # Since the distribution of Z1 is highly non-normal under the null, we use a simulation-based p-value
-    # by simulating standardized losses from a normal distribution and calculating Z1
-    n_sims = 1000
-    N = len(losses)
-    sim_stats = []
-    
-    for _ in range(n_sims):
-        # Generate simulated losses under H0 (e.g., standard normal)
-        sim_losses = np.random.normal(0, 1, N)
-        # Scale to match forecast ES (average)
-        sim_var = norm.ppf(1.0 - alpha)
-        sim_es = norm.pdf(sim_var) / alpha
-        
-        sim_hits = (sim_losses > sim_var).astype(int)
-        sim_z1 = np.mean((sim_losses * sim_hits) / (alpha * sim_es)) - 1.0
-        sim_stats.append(sim_z1)
-        
-    sim_stats = np.array(sim_stats)
-    # P-value is the proportion of simulated Z1 stats that are more negative than observed Z1
-    p_value = np.mean(sim_stats <= z1_stat)
-    
+    es_forecasts = np.clip(np.asarray(es_forecasts), 1e-6, None)
+
+    hits = (losses > var_forecasts).astype(float)
+    NT = hits.sum()
+    num = float(np.sum(losses * hits / es_forecasts))
+    z1_stat = num / NT - 1.0 if NT > 0 else np.nan          # <-- N_T (violation count)
+    z2_stat = num / (len(losses) * alpha) - 1.0             # <-- N*alpha
+
+    # Simulation-based p-values (standard-normal H0) for BOTH statistics
+    n_sims, N = 1000, len(losses)
+    sv = norm.ppf(1.0 - alpha); se = norm.pdf(sv) / alpha
+    sim_z1 = np.empty(n_sims); sim_z2 = np.empty(n_sims)
+    for b in range(n_sims):
+        sl = np.random.normal(0.0, 1.0, N); sh = (sl > sv).astype(float)
+        snt = sh.sum(); sn = float(np.sum(sl * sh / se))
+        sim_z1[b] = sn / snt - 1.0 if snt > 0 else np.nan
+        sim_z2[b] = sn / (N * alpha) - 1.0
+    p1 = float(np.nanmean(sim_z1 <= z1_stat))
+    p2 = float(np.nanmean(sim_z2 <= z2_stat))
+
     return {
-        "z1_stat": z1_stat,
-        "pvalue": p_value
+        "z1_stat": z1_stat, "z1_pvalue": p1,     # TRUE Z1 (violation-count norm.)
+        "z2_stat": z2_stat, "z2_pvalue": p2,
+        "pvalue": p1,                            # backward-compat key
     }
 
 def fissler_ziegel_loss(returns, var_forecasts, es_forecasts, alpha=0.05):
     """
-    Computes the Fissler-Ziegel (FZ) joint VaR-ES loss function.
-    Highly useful for forecast combinations and model comparisons since it is elicitable.
-    Using g1(x) = x, g2(x) = -1/x, G2(x) = -log(-x)
+    AL (Fissler-Ziegel, G1=0) joint VaR-ES score -- Taylor (2019, 2020).
+    Inputs are in the LOSS convention (VaR>0, ES>0); they are converted internally
+    to the RETURNS convention (Q=-VaR<0, ESr=-ES<0) required by the logarithmic AL
+    parametrization: S = Q/ESr - I[y<=Q](Q-y)/(alpha*ESr) + ln(-ESr).
+    (The previous positive-loss log-form was inconsistent: its minimizer had ES<0.)
+    Returns the mean score (lower = better).
     """
-    losses = -np.asarray(returns)
-    var_forecasts = np.asarray(var_forecasts)
-    es_forecasts = np.asarray(es_forecasts)
-    
-    # Enforce positivity and logical bounds (ES >= VaR)
-    # FZ loss expects positive VaR and ES representing losses
-    var = np.clip(var_forecasts, 1e-6, None)
-    es = np.clip(es_forecasts, var, None)
-    
-    hits = (losses > var).astype(int)
-    
-    # FZ formula
-    # S = (I - alpha)*(-var) - I*(-losses) + (-1/es)*(es + 1/alpha*(losses - var)*I) - (-log(es))
-    term1 = (hits - alpha) * (-var)
-    term2 = hits * losses
-    term3 = (-1.0 / es) * (es + (1.0 / alpha) * (losses - var) * hits)
-    term4 = np.log(es)
-    
-    loss_series = term1 + term2 + term3 + term4
-    return np.mean(loss_series)
+    y = np.asarray(returns)
+    Q = -np.asarray(var_forecasts)
+    ESr = -np.clip(np.asarray(es_forecasts), 1e-6, None)
+    ESr = np.minimum(ESr, Q - 1e-9)                 # enforce ES < Q (numeric safety)
+    hit = (y <= Q).astype(float)
+    S = Q / ESr - hit * (Q - y) / (alpha * ESr) + np.log(-ESr)   # const dropped
+    return float(np.mean(S))
+
+
+def al_score_series(returns, var_forecasts, es_forecasts, alpha=0.05):
+    """Per-observation AL score (for skill scores / DM tests). Loss-convention inputs."""
+    y = np.asarray(returns)
+    Q = -np.asarray(var_forecasts)
+    ESr = np.minimum(-np.clip(np.asarray(es_forecasts), 1e-6, None), Q - 1e-9)
+    hit = (y <= Q).astype(float)
+    return Q / ESr - hit * (Q - y) / (alpha * ESr) + np.log(-ESr)
 
 def calculate_cornish_fisher_var(returns, alpha=0.05):
     """
@@ -563,3 +552,78 @@ if __name__ == "__main__":
     print("VaR Backtest:", bt_var)
     print("ES Backtest:", bt_es)
     print("Joint FZ Loss:", fz_loss)
+
+
+##################################################################
+
+
+# ============================================================================
+# Taylor (2020) forecast combination for VaR and ES (via the AL/FZ joint score)
+# ============================================================================
+def min_score_combine(returns, var_mat, es_mat, alpha=0.05):
+    """
+    Taylor (2020) MINIMUM-SCORE combining (Eqs. 3-4). Combines VaR forecasts and
+    the ES-VaR spacing with separate convex weights, estimated jointly by
+    minimising the AL score. Inputs in LOSS convention.
+
+    Parameters
+    ----------
+    returns : (T,) array
+    var_mat, es_mat : (T, M) individual VaR / ES forecasts (loss convention, >0)
+
+    Returns
+    -------
+    var_c, es_c : (T,) combined forecasts (loss convention); wQ, wS : weights
+    """
+    from scipy.optimize import minimize
+    y = np.asarray(returns)
+    Qm = -np.asarray(var_mat); Em = -np.asarray(es_mat)     # returns convention
+    T, M = Qm.shape
+
+    def _al(Qc, ESc):
+        ESc = np.minimum(ESc, Qc - 1e-9)
+        hit = (y <= Qc).astype(float)
+        return (Qc / ESc - hit * (Qc - y) / (alpha * ESc) + np.log(-ESc)).mean()
+
+    def obj(th):
+        wQ, wS = th[:M], th[M:]
+        Qc = Qm @ wQ
+        return _al(Qc, Qc + (Em - Qm) @ wS)
+
+    r = minimize(obj, np.r_[np.ones(M) / M, np.ones(M) / M], method="SLSQP",
+                 bounds=[(0.0, 1.0)] * (2 * M),
+                 constraints=[{"type": "eq", "fun": lambda th: th[:M].sum() - 1},
+                              {"type": "eq", "fun": lambda th: th[M:].sum() - 1}],
+                 options={"maxiter": 300, "ftol": 1e-10})
+    wQ, wS = r.x[:M], r.x[M:]
+    Qc = Qm @ wQ
+    ESc = np.minimum(Qc + (Em - Qm) @ wS, Qc - 1e-9)
+    return -Qc, -ESc, wQ, wS                                # back to loss convention
+
+
+def relative_score_combine(returns, var_mat, es_mat, alpha=0.05):
+    """
+    Taylor (2020) RELATIVE-SCORE combining (Eqs. 5-7). Softmax weights over the
+    cumulative in-sample AL score, single tuning parameter lambda (optimised).
+    Inputs in LOSS convention. Returns var_c, es_c, weights w, lambda.
+    """
+    from scipy.optimize import minimize_scalar
+    y = np.asarray(returns)
+    Qm = -np.asarray(var_mat); Em = -np.asarray(es_mat)
+    T, M = Qm.shape
+
+    def _al_series(Qc, ESc):
+        ESc = np.minimum(ESc, Qc - 1e-9)
+        hit = (y <= Qc).astype(float)
+        return Qc / ESc - hit * (Qc - y) / (alpha * ESc) + np.log(-ESc)
+
+    cumS = np.array([_al_series(Qm[:, i], Em[:, i]).sum() for i in range(M)])
+    c0 = cumS - cumS.min()
+
+    def obj(lam):
+        w = np.exp(-lam * c0); w /= w.sum()
+        return _al_series(Qm @ w, Em @ w).mean()
+
+    lam = max(minimize_scalar(obj, bounds=(0.0, 1e4), method="bounded").x, 0.0)
+    w = np.exp(-lam * c0); w /= w.sum()
+    return -(Qm @ w), -(Em @ w), w, lam
