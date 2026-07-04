@@ -60,6 +60,7 @@ def _cf_es(r_win, alpha):
 
 @st.cache_data(show_spinner=False)
 def compute_rolling_risk(asset, alpha, window, df_key):
+    _CACHE_VERSION = 3  # önbelleği geçersiz kılmak için artırın
     from risk_metrics import (calculate_var_es, calculate_pelve_single,
                                calculate_cornish_fisher_var)
     df = st.session_state.returns_df
@@ -312,13 +313,11 @@ def compute_backtest(asset, alpha, method, window, n_obs, df_key):
 # ─── RENDER ─────────────────────────────────────────────────────────────────
 
 def render():
-    import traceback as _tb
     try:
         _render_impl()
-    except KeyError as _e:
-        import traceback as _tb2
-        st.error(f"**DEBUG — KeyError key:** `{_e!r}`\n\n```\n{_tb2.format_exc()}\n```")
-        raise
+    except Exception as _e:
+        import traceback as _tb
+        st.error(f"**4. Gün hata:** `{_e!r}`\n\n```\n{_tb.format_exc()}\n```")
 
 
 def _render_impl():
@@ -447,7 +446,9 @@ Düşük FZ kaybı → daha iyi model.
         idx   = res["idx"]
         rets  = res["returns"]
         var_d = res["var"]
-        pelve = res["pelve"]
+        pelve = res.get("pelve", np.full(len(idx), np.nan))
+        if "pelve" not in res:
+            st.warning("⚠️ PELVE verisi eski önbellekten geldi — sayfayı yenileyin.")
 
         # Chart 1: Returns + VaR
         fig1 = go.Figure()
