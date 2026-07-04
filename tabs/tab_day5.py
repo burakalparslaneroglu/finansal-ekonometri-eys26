@@ -231,7 +231,7 @@ Yavash frekans bias'ini yok eder; hızlı frekans gürültüsunu cikarir. $O(n^{
 ---
 **Realized Kernel (Barndorff-Nielsen et al., 2008, Econometrica):**
 $$RK = \sum_{h=-H}^{H} k\!\left(\tfrac{h}{H}\right)\hat{\gamma}_h, \quad k(\cdot):\text{Parzen cekirdegi}$$
-$\hat{\gamma}_h$: oto-kovaryans; cekirdek ağırlıklar gürültüyu sondurur.
+$\hat{\gamma}_h$: oto-kovaryans; cekirdek ağırlıklar gürültüyu sondurur. Uygun cekirdek + optimal $H$ ile $O(n^{-1/4})$ yakinsama -- TSRV'nin $n^{-1/6}$'sindan daha hizli (RK daha etkin).
 
 ---
 **Oynaklık Imza Grafigi:**
@@ -261,12 +261,13 @@ $RV^{(w)}$: 5 günlük, $RV^{(m)}$: 22 günlük ortalama. Uzun bellegi basit OLS
 
 ---
 **HAR-RV-J (Andersen, Bollerslev & Diebold, 2007):**
-$$RV_t = \beta_0 + \beta_d BPV_{t-1} + \beta_w BPV_{t-1}^{(w)} + \beta_m BPV_{t-1}^{(m)} + \beta_j J_{t-1} + \varepsilon_t$$
+$$RV_t = \beta_0 + \beta_d RV_{t-1} + \beta_w RV_{t-1}^{(w)} + \beta_m RV_{t-1}^{(m)} + \beta_j J_{t-1} + \varepsilon_t$$
+Gecikmeler toplam $RV$; yalnizca $J_{t-1}=\max(0,RV_{t-1}-BPV_{t-1})$ eklenir. $\beta_j$ genellikle kucuk ve cogu zaman negatif/anlamsizdir (sicramalar kalici degildir).
 
 ---
-**HAR-RV-CJ (Andersen et al., 2007, JASA):**
-$$RV_t = \beta_0 + \beta_{cd}C_t + \beta_{cw}C_t^{(w)} + \beta_{cm}C_t^{(m)} + \beta_{jd}J_t + \varepsilon_t$$
-$C_t = BPV_t$ sürekli yol bilesheni.
+**HAR-RV-CJ (Andersen, Bollerslev & Diebold, 2007, REStat):**
+$$RV_t = \beta_0 + \beta_{cd}C_{t-1} + \beta_{cw}C_{t-1}^{(w)} + \beta_{cm}C_{t-1}^{(m)} + \beta_{jd}J_{t-1} + \beta_{jw}J_{t-1}^{(w)} + \beta_{jm}J_{t-1}^{(m)} + \varepsilon_t$$
+$C_t = BPV_t$ surekli yol bileseni; gecikmeler surekli ve sicrama parcalarina ayristirilir (HAR-RV-J'yi ozel durum olarak icerir).
 
 ---
 **HEAVY (Shephard & Sheppard, 2010):**
@@ -545,8 +546,10 @@ Her oz değeri ayri buzur (Stieltjes donusumu).
 
         if har_model == "HAR-RV-CJ":
             st.info(
-                "HAR-RV-CJ: beta_cd/cw/cm sürekli yol (BPV); beta_jd günlük sıçrama. "
-                "beta_jd anlamsizligi sıçramalarin kalici olmadigini gosterir."
+                "HAR-RV-CJ (6 bilesen): beta_cd/cw/cm surekli yol (C=BPV); "
+                "beta_jd/jw/jm sicrama bilesenleri. Tipik olarak surekli gecikmeler "
+                "baskin ve anlamli, sicrama gecikmeleri kucuk/anlamsiz -- "
+                "ongorulebilirligin nerdeyse tamami surekli bilesenden gelir (ABD 2007)."
             )
 
         st.divider()

@@ -1,3 +1,5 @@
+##################################################################
+
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
@@ -49,35 +51,40 @@ def estimate_har_rv(rv_series, lags=(1, 5, 22)):
 
 def estimate_har_rv_j(rv_series, bpv_series, lags=(1, 5, 22)):
     """
-    Estimates the HAR-RV-J model (HAR with Jumps separated using Bipower Variation).
-    RV_t = beta_0 + beta_d * BPV_{t-1} + beta_w * BPV_{t-1:t-5} + beta_m * BPV_{t-1:t-22} + beta_j * J_{t-1} + eps_t
+    Estimates the HAR-RV-J model (Andersen, Bollerslev & Diebold 2007, REStat).
+
+    The lag structure is UNCHANGED from the baseline HAR-RV (total-RV daily,
+    weekly and monthly lags); only a daily jump term is added:
+
+        RV_t = beta_0 + beta_d * RV_{t-1} + beta_w * RV_{t-1}^(w)
+             + beta_m * RV_{t-1}^(m) + beta_j * J_{t-1} + eps_t
+
+    with J_{t-1} = max(0, RV_{t-1} - BPV_{t-1}).  (This differs from HAR-RV-CJ,
+    which instead decomposes the *lags* into continuous C=BPV and jump parts.)
+    Empirically beta_j is typically small and often negative/insignificant: the
+    jump component is far less persistent than the continuous component.
     """
     df_har = pd.DataFrame(index=rv_series.index)
     df_har["RV"] = rv_series
-    df_har["BPV"] = bpv_series
-    
-    # Jump component: J_t = max(0, RV_t - BPV_t)
     df_har["J"] = (rv_series - bpv_series).clip(lower=0)
-    
-    # Daily BPV and J lags
-    df_har["BPV_d"] = bpv_series.shift(1)
+
+    # Total-RV lags (daily / weekly / monthly) -- same as baseline HAR-RV
+    df_har["RV_d"] = rv_series.shift(1)
+    df_har["RV_w"] = rv_series.shift(1).rolling(window=lags[1]).mean()
+    df_har["RV_m"] = rv_series.shift(1).rolling(window=lags[2]).mean()
+
+    # Daily jump lag
     df_har["J_d"] = df_har["J"].shift(1)
-    
-    # Weekly BPV lag
-    df_har["BPV_w"] = bpv_series.shift(1).rolling(window=lags[1]).mean()
-    
-    # Monthly BPV lag
-    df_har["BPV_m"] = bpv_series.shift(1).rolling(window=lags[2]).mean()
-    
+
     df_har_clean = df_har.dropna()
-    
-    X = df_har_clean[["BPV_d", "BPV_w", "BPV_m", "J_d"]]
+
+    X = df_har_clean[["RV_d", "RV_w", "RV_m", "J_d"]]
     X = sm.add_constant(X)
     y = df_har_clean["RV"]
-    
+
     model = sm.OLS(y, X)
     results = model.fit()
-    
+
     return results, df_har_clean
 
 def poet_covariance(returns, k_factors=3, threshold=0.1):
@@ -103,7 +110,7 @@ def poet_covariance(returns, k_factors=3, threshold=0.1):
     # Sort eigenvalues & eigenvectors in descending order
     idx = np.argsort(eigenvalues)[::-1]
     eigenvalues = eigenvalues[idx]
-    eigenvectors = eigenvectors[idx]
+    eigenvectors = eigenvectors[:, idx]      # reorder COLUMNS (eigh returns column eigenvectors)
     
     # 3. Factor component
     # Keep the top k eigenvalues and eigenvectors
@@ -154,40 +161,46 @@ def ledoit_wolf_covariance(returns):
 
 def estimate_har_rv_cj(rv_series, bpv_series, lags=(1, 5, 22)):
     """
-    HAR-RV-CJ: separates continuous (BPV) and jump (J) components at multiple horizons.
-    Andersen, Bollerslev, Diebold (2007, JASA).
+    HAR-RV-CJ: separates continuous (BPV) and jump (J) components at the daily,
+    weekly and monthly horizons (Andersen, Bollerslev & Diebold 2007, REStat
+    89(4):701-720).  This is the full six-component specification, which nests
+    HAR-RV-J as a restricted case.
 
-    RV_{t+1} = beta_0
-             + beta_cd * C_t + beta_cw * C_t^(w) + beta_cm * C_t^(m)
-             + beta_jd * J_t
-             + eps_{t+1}
+    RV_{t} = beta_0
+           + beta_cd*C_{t-1} + beta_cw*C_{t-1}^(w) + beta_cm*C_{t-1}^(m)
+           + beta_jd*J_{t-1} + beta_jw*J_{t-1}^(w) + beta_jm*J_{t-1}^(m)
+           + eps_{t}
 
-    C_t = BPV_t (continuous path)
-    J_t = max(0, RV_t - BPV_t) (jump component)
-    C_t^(w) = mean of C over past 5 days
-    C_t^(m) = mean of C over past 22 days
+    C_t = BPV_t (continuous path), J_t = max(0, RV_t - BPV_t) (jump component);
+    ^(w),^(m) denote 5- and 22-day trailing averages.
 
-    Uses HAC standard errors (Newey-West, lags=5) via statsmodels.
+    Empirically the continuous lags carry the persistence and dominate, while the
+    jump lags are typically small and often insignificant (almost all volatility
+    predictability comes from the continuous component).
 
-    Returns: (results, df_har_cj) where df_har_cj has columns
-    [RV, C_d, C_w, C_m, J_d, fitted, resid]
+    Uses HAC standard errors (Newey-West, lags=5).
+
+    Returns: (results, df_cj) where df_cj has columns
+    [RV, C_d, C_w, C_m, J_d, J_w, J_m, fitted, resid].
     """
     df = pd.DataFrame(index=rv_series.index)
     df["RV"] = rv_series.values
-    df["C"] = np.maximum(0.0, bpv_series.values)          # continuous component
-    df["J"] = np.maximum(0.0, rv_series.values - bpv_series.values)  # jump component
+    df["C"] = np.maximum(0.0, bpv_series.values)                     # continuous
+    df["J"] = np.maximum(0.0, rv_series.values - bpv_series.values)  # jump
 
-    # Lagged continuous components
+    # Lagged continuous components (d / w / m)
     df["C_d"] = df["C"].shift(1)
     df["C_w"] = df["C"].shift(1).rolling(window=lags[1]).mean()
     df["C_m"] = df["C"].shift(1).rolling(window=lags[2]).mean()
 
-    # Lagged daily jump
+    # Lagged jump components (d / w / m)
     df["J_d"] = df["J"].shift(1)
+    df["J_w"] = df["J"].shift(1).rolling(window=lags[1]).mean()
+    df["J_m"] = df["J"].shift(1).rolling(window=lags[2]).mean()
 
     df_clean = df.dropna()
 
-    X = df_clean[["C_d", "C_w", "C_m", "J_d"]]
+    X = df_clean[["C_d", "C_w", "C_m", "J_d", "J_w", "J_m"]]
     X = sm.add_constant(X)
     y = df_clean["RV"]
 
@@ -198,7 +211,7 @@ def estimate_har_rv_cj(rv_series, bpv_series, lags=(1, 5, 22)):
     df_clean["fitted"] = results.fittedvalues
     df_clean["resid"] = results.resid
 
-    return results, df_clean[["RV", "C_d", "C_w", "C_m", "J_d", "fitted", "resid"]]
+    return results, df_clean[["RV", "C_d", "C_w", "C_m", "J_d", "J_w", "J_m", "fitted", "resid"]]
 
 
 def estimate_har_rv_hac(rv_series, lags=(1, 5, 22), hac_lags=5):
@@ -670,3 +683,6 @@ if __name__ == "__main__":
     print("Sample Covariance Shape:", returns.cov().shape)
     print("POET Covariance Matrix (Asset 1-3):\n", poet_cov[:3, :3])
     print("Ledoit-Wolf Shrinkage intensity:", shrinkage)
+
+
+##################################################################
