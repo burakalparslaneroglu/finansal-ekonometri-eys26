@@ -446,6 +446,8 @@ Düşük FZ kaybı → daha iyi model.
             line=dict(color="rgba(96,165,250,0.45)", width=0.8),
         ))
         for meth, color in COLORS_METHOD.items():
+            if meth not in var_d:
+                continue  # GARCH-Normal rolling VaR hesaplanmaz (yalnızca OOS karşılaştırmasında)
             fig1.add_trace(go.Scatter(
                 x=idx, y=-var_d[meth],
                 mode="lines", name=f"VaR — {meth}",
