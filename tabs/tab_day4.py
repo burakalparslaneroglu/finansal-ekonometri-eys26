@@ -312,6 +312,16 @@ def compute_backtest(asset, alpha, method, window, n_obs, df_key):
 # ─── RENDER ─────────────────────────────────────────────────────────────────
 
 def render():
+    import traceback as _tb
+    try:
+        _render_impl()
+    except KeyError as _e:
+        import traceback as _tb2
+        st.error(f"**DEBUG — KeyError key:** `{_e!r}`\n\n```\n{_tb2.format_exc()}\n```")
+        raise
+
+
+def _render_impl():
     (tab_theory, tab_risk, tab_evt,
      tab_systemic, tab_fz, tab_backtest) = st.tabs([
         "📖 Teori",
