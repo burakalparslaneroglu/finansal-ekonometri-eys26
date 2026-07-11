@@ -125,45 +125,31 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**Veri**")
 
-    use_custom = st.checkbox("Kendi verinizi yükleyin", value=False)
-    _custom_ok = False
-    if use_custom:
-        uploaded = st.file_uploader(
-            "CSV yükle (tarih index, getiri sütunlar)",
-            type=["csv"],
-            key="csv_uploader"
-        )
-        if uploaded is not None:
-            try:
-                df_uploaded = pd.read_csv(uploaded, index_col=0, parse_dates=True)
-                st.session_state.returns_df = df_uploaded
-                _custom_ok = True
-                st.success(f"Yuklendi: {df_uploaded.shape[0]} satir, {df_uploaded.shape[1]} sutun")
-            except Exception as exc:
-                st.error(f"CSV okunamadi: {exc}")
+    if not st.session_state.get("data_loaded"):
+        if st.button("📂 Örnek Veriyi Yükle", use_container_width=True):
+            with st.spinner("Veri yükleniyor…"):
                 st.session_state.returns_df = load_default_data()
-        else:
-            st.session_state.returns_df = load_default_data()
+                st.session_state["crisis_window"] = load_crisis_window()
+                st.session_state["data_loaded"] = True
+            st.rerun()
     else:
-        st.session_state.returns_df = load_default_data()
-
-    # Kriz penceresi: yalnızca paketlenmiş varsayılan veri için meta'dan yükle;
-    # kullanıcı verisinde None -> tab_day3 otomatik stres-penceresi tespitine düşer.
-    st.session_state["crisis_window"] = None if _custom_ok else load_crisis_window()
-
-    # Data info
-    df_info = st.session_state.returns_df
-    asset_cols_info = [
-        c for c in df_info.columns
-        if not c.endswith("_RV") and not c.endswith("_BPV")
-    ]
-    st.caption(f"Varlik sayisi: {len(asset_cols_info)}")
-    st.caption(f"Gozlem: {len(df_info)}")
-    if not df_info.empty:
-        st.caption(
-            f"Tarih: {df_info.index[0].strftime('%Y-%m-%d')} — "
-            f"{df_info.index[-1].strftime('%Y-%m-%d')}"
-        )
+        df_info = st.session_state.returns_df
+        asset_cols_info = [
+            c for c in df_info.columns
+            if not c.endswith("_RV") and not c.endswith("_BPV")
+        ]
+        st.success("✅ Veri yüklendi")
+        st.caption(f"Varlık sayısı: {len(asset_cols_info)}")
+        st.caption(f"Gözlem: {len(df_info)}")
+        if not df_info.empty:
+            st.caption(
+                f"Tarih: {df_info.index[0].strftime('%Y-%m-%d')} — "
+                f"{df_info.index[-1].strftime('%Y-%m-%d')}"
+            )
+        if st.button("🔄 Veriyi Sıfırla", use_container_width=True):
+            for k in list(st.session_state.keys()):
+                del st.session_state[k]
+            st.rerun()
 
     st.markdown("---")
     st.markdown("**Yazilim:** Python · Streamlit · Plotly")
@@ -191,20 +177,25 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
-# Route to day module
-# Tabs read data from st.session_state.returns_df (a DataFrame).
+# Route to day module — only after data is loaded
 # ---------------------------------------------------------------------------
-if day == "3. Gün — Çok Değişkenli Oynaklık (DCC)":
-    from tabs import tab_day3
-    tab_day3.render()
+if not st.session_state.get("data_loaded"):
+    st.info(
+        "**Başlamak için** sol menüden **📂 Örnek Veriyi Yükle** düğmesine tıklayın.",
+        icon="👈",
+    )
+else:
+    if day == "3. Gün — Çok Değişkenli Oynaklık (DCC)":
+        from tabs import tab_day3
+        tab_day3.render()
 
-elif day == "4. Gün — Risk Ölçütleri & Backtest":
-    from tabs import tab_day4
-    tab_day4.render()
+    elif day == "4. Gün — Risk Ölçütleri & Backtest":
+        from tabs import tab_day4
+        tab_day4.render()
 
-elif day == "5. Gün — Gerçekleşen Oynaklık & Büyük Boyut":
-    from tabs import tab_day5
-    tab_day5.render()
+    elif day == "5. Gün — Gerçekleşen Oynaklık & Büyük Boyut":
+        from tabs import tab_day5
+        tab_day5.render()
 
 
 ##################################################################

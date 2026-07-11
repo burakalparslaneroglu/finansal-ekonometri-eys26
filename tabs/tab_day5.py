@@ -192,6 +192,12 @@ def _cached_signature(eta2_scale, df_key):
     return pd.DataFrame(records)
 
 
+# ─── SENTINEL ────────────────────────────────────────────────────────────────
+
+class _NoCompute(Exception):
+    """Raised inside a tab's try block to skip remaining display code."""
+
+
 # ---------------------------------------------------------------------------
 # render()
 # ---------------------------------------------------------------------------
@@ -329,6 +335,22 @@ Her oz değeri ayri buzur (Stieltjes donusumu).
                 {"N/T": "0.50-1.00", "Yöntem": "POET (k>=2)",     "Not": "Faktor yapisi var"},
                 {"N/T": "> 1.00",    "Yöntem": "POET zorunlu",    "Not": "Ornek tekil"},
             ]), hide_index=True, use_container_width=True)
+
+        # ── Notebook indirme ─────────────────────────────────────────────────
+        st.divider()
+        try:
+            from pathlib import Path as _Path
+            _nb_path = _Path(__file__).parent.parent / "notebooks" / "gun5_rv.ipynb"
+            if _nb_path.exists():
+                st.download_button(
+                    label="📥 Jupyter Not Defteri İndir (gun5_rv.ipynb)",
+                    data=_nb_path.read_bytes(),
+                    file_name="gun5_rv.ipynb",
+                    mime="application/json",
+                    use_container_width=True,
+                )
+        except Exception:
+            pass
 
     # =========================================================================
     # TAB 2: Volatilite Imza Grafigi
@@ -478,596 +500,681 @@ Her oz değeri ayri buzur (Stieltjes donusumu).
     # TAB 3: HAR-RV Modeli
     # =========================================================================
     with tab_har:
-        st.markdown("### HAR-RV Model Tahmini")
-        df = st.session_state.returns_df
-        ac = _asset_cols(df)
-        df_key = id(df)
+        try:
+            st.markdown("### HAR-RV Model Tahmini")
+            df = st.session_state.returns_df
+            ac = _asset_cols(df)
+            df_key = id(df)
 
-        col_a, col_b, col_c = st.columns(3)
-        with col_a:
-            har_asset = st.selectbox("Varlık", ac, key="har3_asset")
-        with col_b:
-            har_model = st.selectbox(
-                "Model",
-                ["HAR-RV", "HAR-RV (HAC)", "HAR-RV-J", "HAR-RV-CJ"],
-                key="har3_model",
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                har_asset = st.selectbox("Varlık", ac, key="har3_asset")
+            with col_b:
+                har_model = st.selectbox(
+                    "Model",
+                    ["HAR-RV", "HAR-RV (HAC)", "HAR-RV-J", "HAR-RV-CJ"],
+                    key="har3_model",
+                )
+            with col_c:
+                forecast_horizon = st.slider("Öngörü Ufku (gün)", 1, 22, 5, key="har3_horizon")
+                st.caption(f"Secili ufuk: {forecast_horizon} gün")
+
+            # Cache key
+            _key = f"d5_har_{har_asset}_{har_model}_{df_key}"
+
+            # Button
+            if st.button("🔄 Hesapla", key="d5_har_run", type="primary"):
+                with st.spinner("Model tahmin ediliyor..."):
+                    try:
+                        st.session_state[_key] = _cached_har(har_model, har_asset, df_key)
+                    except Exception as _exc:
+                        st.error(f"Hata: `{_exc}`")
+                        raise _NoCompute
+
+            # Gate
+            if _key not in st.session_state:
+                st.info("⬆️ Parametreleri seçip **🔄 Hesapla**'ya tıklayın.")
+                raise _NoCompute
+
+            res, dfm, rv_s, bpv_s = st.session_state[_key]
+
+            if "fitted" in dfm.columns:
+                fitted = dfm["fitted"]
+                resid = dfm["resid"]
+            else:
+                fitted = res.fittedvalues
+                resid = res.resid
+
+            r2 = res.rsquared
+            adj_r2 = res.rsquared_adj
+            n_obs = int(res.nobs)
+
+            st.markdown("#### Tahmin Sonuclari")
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                st.markdown(_metric_card("R2", f"{r2:.4f}"), unsafe_allow_html=True)
+            with m2:
+                st.markdown(_metric_card("Duz. R2", f"{adj_r2:.4f}", "#34d399"), unsafe_allow_html=True)
+            with m3:
+                st.markdown(_metric_card("Gozlem", str(n_obs), "#60a5fa"), unsafe_allow_html=True)
+            st.markdown("")
+
+            params_df = pd.DataFrame({
+                "Katsayı": res.params,
+                "Std. Hata": res.bse,
+                "t-ist.": res.tvalues,
+                "p-değeri": res.pvalues,
+            }).round(6)
+
+            def _color_pval(v):
+                try:
+                    fv = float(v)
+                    if fv < 0.001:
+                        return "color:#f87171;font-weight:700"
+                    if fv < 0.05:
+                        return "color:#f97316"
+                    return "color:#34d399"
+                except Exception:
+                    return ""
+
+            st.markdown("**Katsayı Tablosu** (kırmızı => p<0.001, turuncu => p<0.05, yesil => anlaml degil)")
+            st.dataframe(
+                params_df.style.map(_color_pval, subset=["p-değeri"]),
+                use_container_width=True,
             )
-        with col_c:
-            forecast_horizon = st.slider("Öngörü Ufku (gün)", 1, 22, 5, key="har3_horizon")
-            st.caption(f"Secili ufuk: {forecast_horizon} gün")
 
-        with st.spinner("Model tahmin ediliyor..."):
-            res, dfm, rv_s, bpv_s = _cached_har(har_model, har_asset, df_key)
+            if har_model == "HAR-RV-CJ":
+                st.info(
+                    "HAR-RV-CJ (6 bilesen): beta_cd/cw/cm surekli yol (C=BPV); "
+                    "beta_jd/jw/jm sicrama bilesenleri. Tipik olarak surekli gecikmeler "
+                    "baskin ve anlamli, sicrama gecikmeleri kucuk/anlamsiz -- "
+                    "ongorulebilirligin nerdeyse tamami surekli bilesenden gelir (ABD 2007)."
+                )
 
-        if "fitted" in dfm.columns:
-            fitted = dfm["fitted"]
-            resid = dfm["resid"]
-        else:
-            fitted = res.fittedvalues
-            resid = res.resid
+            st.divider()
 
-        r2 = res.rsquared
-        adj_r2 = res.rsquared_adj
-        n_obs = int(res.nobs)
+            if "RV" in dfm.columns:
+                actual_y = dfm["RV"]
+            else:
+                actual_y = rv_s.reindex(dfm.index)
 
-        st.markdown("#### Tahmin Sonuclari")
-        m1, m2, m3 = st.columns(3)
-        with m1:
-            st.markdown(_metric_card("R2", f"{r2:.4f}"), unsafe_allow_html=True)
-        with m2:
-            st.markdown(_metric_card("Duz. R2", f"{adj_r2:.4f}", "#34d399"), unsafe_allow_html=True)
-        with m3:
-            st.markdown(_metric_card("Gozlem", str(n_obs), "#60a5fa"), unsafe_allow_html=True)
-        st.markdown("")
-
-        params_df = pd.DataFrame({
-            "Katsayı": res.params,
-            "Std. Hata": res.bse,
-            "t-ist.": res.tvalues,
-            "p-değeri": res.pvalues,
-        }).round(6)
-
-        def _color_pval(v):
-            try:
-                fv = float(v)
-                if fv < 0.001:
-                    return "color:#f87171;font-weight:700"
-                if fv < 0.05:
-                    return "color:#f97316"
-                return "color:#34d399"
-            except Exception:
-                return ""
-
-        st.markdown("**Katsayı Tablosu** (kırmızı => p<0.001, turuncu => p<0.05, yesil => anlaml degil)")
-        st.dataframe(
-            params_df.style.map(_color_pval, subset=["p-değeri"]),
-            use_container_width=True,
-        )
-
-        if har_model == "HAR-RV-CJ":
-            st.info(
-                "HAR-RV-CJ (6 bilesen): beta_cd/cw/cm surekli yol (C=BPV); "
-                "beta_jd/jw/jm sicrama bilesenleri. Tipik olarak surekli gecikmeler "
-                "baskin ve anlamli, sicrama gecikmeleri kucuk/anlamsiz -- "
-                "ongorulebilirligin nerdeyse tamami surekli bilesenden gelir (ABD 2007)."
+            fig_fit = go.Figure()
+            fig_fit.add_trace(go.Scatter(
+                x=actual_y.index, y=actual_y.values,
+                mode="lines", name="Gerçek RV",
+                line=dict(color="#60a5fa", width=1.0), opacity=0.75,
+            ))
+            fig_fit.add_trace(go.Scatter(
+                x=fitted.index, y=fitted.values,
+                mode="lines", name=f"{har_model} Fitted",
+                line=dict(color=COLORS[0], width=2.0),
+            ))
+            fig_fit.update_layout(
+                template=PLOT_TEMPLATE, height=380,
+                title=f"Gerçek RV vs. {har_model} Fitted -- {har_asset}",
+                xaxis_title="Tarih", yaxis_title="Gerçekleşen Varyans",
+                margin=dict(l=20, r=20, t=55, b=30),
+                legend=dict(orientation="h", y=-0.18),
             )
+            st.plotly_chart(fig_fit, use_container_width=True)
 
-        st.divider()
+            st.markdown("**Kalikti Otokorelasyon Fonksiyonu (ACF)**")
+            resid_vals = np.asarray(resid, dtype=float)
+            resid_vals = resid_vals[np.isfinite(resid_vals)]
+            acf_vals = sm.tsa.acf(resid_vals, nlags=20, fft=True)
+            n_res = len(resid_vals)
+            conf_band = 1.96 / np.sqrt(max(n_res, 1))
+            lags_range = list(range(1, 21))
+            acf_plot = acf_vals[1:21]
+            acf_colors = ["#f87171" if abs(v) > conf_band else "#60a5fa" for v in acf_plot]
 
-        if "RV" in dfm.columns:
-            actual_y = dfm["RV"]
-        else:
-            actual_y = rv_s.reindex(dfm.index)
-
-        fig_fit = go.Figure()
-        fig_fit.add_trace(go.Scatter(
-            x=actual_y.index, y=actual_y.values,
-            mode="lines", name="Gerçek RV",
-            line=dict(color="#60a5fa", width=1.0), opacity=0.75,
-        ))
-        fig_fit.add_trace(go.Scatter(
-            x=fitted.index, y=fitted.values,
-            mode="lines", name=f"{har_model} Fitted",
-            line=dict(color=COLORS[0], width=2.0),
-        ))
-        fig_fit.update_layout(
-            template=PLOT_TEMPLATE, height=380,
-            title=f"Gerçek RV vs. {har_model} Fitted -- {har_asset}",
-            xaxis_title="Tarih", yaxis_title="Gerçekleşen Varyans",
-            margin=dict(l=20, r=20, t=55, b=30),
-            legend=dict(orientation="h", y=-0.18),
-        )
-        st.plotly_chart(fig_fit, use_container_width=True)
-
-        st.markdown("**Kalikti Otokorelasyon Fonksiyonu (ACF)**")
-        resid_vals = np.asarray(resid, dtype=float)
-        resid_vals = resid_vals[np.isfinite(resid_vals)]
-        acf_vals = sm.tsa.acf(resid_vals, nlags=20, fft=True)
-        n_res = len(resid_vals)
-        conf_band = 1.96 / np.sqrt(max(n_res, 1))
-        lags_range = list(range(1, 21))
-        acf_plot = acf_vals[1:21]
-        acf_colors = ["#f87171" if abs(v) > conf_band else "#60a5fa" for v in acf_plot]
-
-        fig_acf = go.Figure()
-        fig_acf.add_trace(go.Bar(
-            x=lags_range, y=acf_plot,
-            marker_color=acf_colors, name="ACF",
-        ))
-        fig_acf.add_hline(y=conf_band,  line_dash="dot", line_color="#fbbf24", line_width=1)
-        fig_acf.add_hline(y=-conf_band, line_dash="dot", line_color="#fbbf24", line_width=1)
-        fig_acf.update_layout(
-            template=PLOT_TEMPLATE, height=280,
-            title=f"Kalikti ACF -- {har_model} (+/-{conf_band:.3f} = 95% bant)",
-            xaxis_title="Gecikme", yaxis_title="ACF",
-            margin=dict(l=20, r=20, t=50, b=30),
-        )
-        st.plotly_chart(fig_acf, use_container_width=True)
-        st.caption(
-            "Kırmızı barlar 95% guven bandinin disinda -- kalikitilarda otokorelasyon var. "
-            "HAC standart hatalar kullanmak onerilir (HAR-RV HAC secenegi)."
-        )
+            fig_acf = go.Figure()
+            fig_acf.add_trace(go.Bar(
+                x=lags_range, y=acf_plot,
+                marker_color=acf_colors, name="ACF",
+            ))
+            fig_acf.add_hline(y=conf_band,  line_dash="dot", line_color="#fbbf24", line_width=1)
+            fig_acf.add_hline(y=-conf_band, line_dash="dot", line_color="#fbbf24", line_width=1)
+            fig_acf.update_layout(
+                template=PLOT_TEMPLATE, height=280,
+                title=f"Kalikti ACF -- {har_model} (+/-{conf_band:.3f} = 95% bant)",
+                xaxis_title="Gecikme", yaxis_title="ACF",
+                margin=dict(l=20, r=20, t=50, b=30),
+            )
+            st.plotly_chart(fig_acf, use_container_width=True)
+            st.caption(
+                "Kırmızı barlar 95% guven bandinin disinda -- kalikitilarda otokorelasyon var. "
+                "HAC standart hatalar kullanmak onerilir (HAR-RV HAC secenegi)."
+            )
+        except _NoCompute:
+            pass
 
     # =========================================================================
     # TAB 4: Yüksek Frekanslı Modeller
     # =========================================================================
     with tab_hf:
-        st.markdown("### Yüksek Frekanslı Oynaklık Modelleri")
-        df = st.session_state.returns_df
-        ac = _asset_cols(df)
-        df_key = id(df)
+        try:
+            st.markdown("### Yüksek Frekanslı Oynaklık Modelleri")
+            df = st.session_state.returns_df
+            ac = _asset_cols(df)
+            df_key = id(df)
 
-        col_a, col_b = st.columns([2, 3])
-        with col_a:
-            hf_asset = st.selectbox("Varlık", ac, key="hf_asset")
-        with col_b:
-            selected_models = st.multiselect(
-                "Modeller",
-                ["GARCH(1,1) baseline", "HEAVY", "GARCH-X", "Realized GARCH"],
-                default=["GARCH(1,1) baseline", "HEAVY", "GARCH-X"],
-                key="hf_models",
-            )
+            col_a, col_b = st.columns([2, 3])
+            with col_a:
+                hf_asset = st.selectbox("Varlık", ac, key="hf_asset")
+            with col_b:
+                selected_models = st.multiselect(
+                    "Modeller",
+                    ["GARCH(1,1) baseline", "HEAVY", "GARCH-X", "Realized GARCH"],
+                    default=["GARCH(1,1) baseline", "HEAVY", "GARCH-X"],
+                    key="hf_models",
+                )
 
-        if not selected_models:
-            st.info("Lutfen en az bir model secin.")
-            st.stop()
+            if not selected_models:
+                st.info("Lutfen en az bir model secin.")
+                raise _NoCompute
 
-        model_results = {}
-        progress_bar = st.progress(0, text="Modeller hesaplaniyor...")
-        total_m = len(selected_models)
+            # Cache key
+            _key = f"d5_hf_{hf_asset}_{'_'.join(sorted(selected_models))}_{df_key}"
 
-        for i, mname in enumerate(selected_models):
-            progress_bar.progress(i / total_m, text=f"{mname} tahmini...")
-            try:
-                if mname == "GARCH(1,1) baseline":
-                    model_results[mname] = _cached_garch_baseline(hf_asset, df_key)
-                elif mname == "HEAVY":
-                    model_results[mname] = _cached_heavy(hf_asset, df_key)
-                elif mname == "GARCH-X":
-                    model_results[mname] = _cached_garch_x(hf_asset, df_key)
-                elif mname == "Realized GARCH":
-                    model_results[mname] = _cached_realized_garch(hf_asset, df_key)
-            except Exception as e:
-                st.warning(f"{mname} hatasi: {e}")
+            # Button
+            if st.button("🔄 Hesapla", key="d5_hf_run", type="primary"):
+                with st.spinner("Modeller hesaplaniyor..."):
+                    try:
+                        _model_results = {}
+                        for _mname in selected_models:
+                            try:
+                                if _mname == "GARCH(1,1) baseline":
+                                    _model_results[_mname] = _cached_garch_baseline(hf_asset, df_key)
+                                elif _mname == "HEAVY":
+                                    _model_results[_mname] = _cached_heavy(hf_asset, df_key)
+                                elif _mname == "GARCH-X":
+                                    _model_results[_mname] = _cached_garch_x(hf_asset, df_key)
+                                elif _mname == "Realized GARCH":
+                                    _model_results[_mname] = _cached_realized_garch(hf_asset, df_key)
+                            except Exception as _e:
+                                st.warning(f"{_mname} hatasi: {_e}")
+                        if not _model_results:
+                            st.error("Hicbir model tahmin edilemedi.")
+                            raise _NoCompute
+                        st.session_state[_key] = _model_results
+                    except _NoCompute:
+                        raise
+                    except Exception as _exc:
+                        st.error(f"Hata: `{_exc}`")
+                        raise _NoCompute
 
-        progress_bar.progress(1.0, text="Tamamlandi.")
+            # Gate
+            if _key not in st.session_state:
+                st.info("⬆️ Parametreleri seçip **🔄 Hesapla**'ya tıklayın.")
+                raise _NoCompute
 
-        if not model_results:
-            st.error("Hicbir model tahmin edilemedi.")
-            st.stop()
+            model_results = st.session_state[_key]
 
-        MODEL_COLORS = {
-            "GARCH(1,1) baseline": COLORS[3],
-            "HEAVY":               COLORS[0],
-            "GARCH-X":             COLORS[1],
-            "Realized GARCH":      COLORS[2],
-        }
+            MODEL_COLORS = {
+                "GARCH(1,1) baseline": COLORS[3],
+                "HEAVY":               COLORS[0],
+                "GARCH-X":             COLORS[1],
+                "Realized GARCH":      COLORS[2],
+            }
 
-        # sigma2 time series overlay
-        fig_hf = go.Figure()
-        for mname, r in model_results.items():
-            s2 = r["sigma2_series"]
-            ann_vol = np.sqrt(np.maximum(s2, 0) * 252) * 100
+            # sigma2 time series overlay
+            fig_hf = go.Figure()
+            for mname, r in model_results.items():
+                s2 = r["sigma2_series"]
+                ann_vol = np.sqrt(np.maximum(s2, 0) * 252) * 100
+                fig_hf.add_trace(go.Scatter(
+                    x=s2.index, y=ann_vol.values,
+                    mode="lines", name=mname,
+                    line=dict(color=MODEL_COLORS.get(mname, "#fff"), width=1.6),
+                    opacity=0.85,
+                ))
+            rv_s, _ = _get_rv_bpv(df, hf_asset)
+            ann_rv_ref = np.sqrt(rv_s * 252) * 100
             fig_hf.add_trace(go.Scatter(
-                x=s2.index, y=ann_vol.values,
-                mode="lines", name=mname,
-                line=dict(color=MODEL_COLORS.get(mname, "#fff"), width=1.6),
-                opacity=0.85,
+                x=rv_s.index, y=ann_rv_ref.values,
+                mode="lines", name="sqrt(RV*252)*100 (referans)",
+                line=dict(color="#94a3b8", width=0.8, dash="dot"), opacity=0.5,
             ))
-        rv_s, _ = _get_rv_bpv(df, hf_asset)
-        ann_rv_ref = np.sqrt(rv_s * 252) * 100
-        fig_hf.add_trace(go.Scatter(
-            x=rv_s.index, y=ann_rv_ref.values,
-            mode="lines", name="sqrt(RV*252)*100 (referans)",
-            line=dict(color="#94a3b8", width=0.8, dash="dot"), opacity=0.5,
-        ))
-        fig_hf.update_layout(
-            template=PLOT_TEMPLATE, height=380,
-            title=f"Koşullu Oynaklık Karşılaştırması -- {hf_asset} (yıllıkl. %)",
-            xaxis_title="Tarih", yaxis_title="Yıllıkl. Oynaklık (%)",
-            margin=dict(l=20, r=20, t=55, b=35),
-            legend=dict(orientation="h", y=-0.22),
-        )
-        st.plotly_chart(fig_hf, use_container_width=True)
+            fig_hf.update_layout(
+                template=PLOT_TEMPLATE, height=380,
+                title=f"Koşullu Oynaklık Karşılaştırması -- {hf_asset} (yıllıkl. %)",
+                xaxis_title="Tarih", yaxis_title="Yıllıkl. Oynaklık (%)",
+                margin=dict(l=20, r=20, t=55, b=35),
+                legend=dict(orientation="h", y=-0.22),
+            )
+            st.plotly_chart(fig_hf, use_container_width=True)
 
-        # Comparison table
-        st.markdown("**Model Karşılaştırma Tablosu**")
-        rows_cmp = []
-        for mname, r in model_results.items():
-            pers = r.get("persistence", float("nan"))
-            hl = np.log(0.5) / np.log(pers) if (0 < pers < 1) else float("inf")
-            loglik = r.get("loglik", float("nan"))
-            p = r.get("params", {})
-            if mname == "GARCH-X":
-                note = f"gamma={p.get('gamma',0):.5f} (t={r.get('gamma_tstat', float('nan')):.2f})"
-            elif mname == "Realized GARCH":
-                note = f"gamma={p.get('gamma', float('nan')):.4f}, tau1={r.get('leverage_tau1', float('nan')):.3f}"
-            elif mname == "HEAVY":
-                note = f"alpha={p.get('alpha',0):.4f}, beta={p.get('beta',0):.4f}"
-            else:
-                note = f"alpha={p.get('alpha',0):.4f}, beta={p.get('beta',0):.4f}"
-            rows_cmp.append({
-                "Model": mname,
-                "Kalicilik (a+b)": f"{pers:.4f}" if not (isinstance(pers, float) and pers != pers) else "-",
-                "Yarı-Ömür (gün)": f"{hl:.1f}" if hl != float("inf") and hl == hl else "inf",
-                "Log-lik": f"{loglik:,.1f}" if loglik == loglik else "-",
-                "Parametre Notu": note,
-            })
-        st.dataframe(pd.DataFrame(rows_cmp), use_container_width=True, hide_index=True)
+            # Comparison table
+            st.markdown("**Model Karşılaştırma Tablosu**")
+            rows_cmp = []
+            for mname, r in model_results.items():
+                pers = r.get("persistence", float("nan"))
+                hl = np.log(0.5) / np.log(pers) if (0 < pers < 1) else float("inf")
+                loglik = r.get("loglik", float("nan"))
+                p = r.get("params", {})
+                if mname == "GARCH-X":
+                    note = f"gamma={p.get('gamma',0):.5f} (t={r.get('gamma_tstat', float('nan')):.2f})"
+                elif mname == "Realized GARCH":
+                    note = f"gamma={p.get('gamma', float('nan')):.4f}, tau1={r.get('leverage_tau1', float('nan')):.3f}"
+                elif mname == "HEAVY":
+                    note = f"alpha={p.get('alpha',0):.4f}, beta={p.get('beta',0):.4f}"
+                else:
+                    note = f"alpha={p.get('alpha',0):.4f}, beta={p.get('beta',0):.4f}"
+                rows_cmp.append({
+                    "Model": mname,
+                    "Kalicilik (a+b)": f"{pers:.4f}" if not (isinstance(pers, float) and pers != pers) else "-",
+                    "Yarı-Ömür (gün)": f"{hl:.1f}" if hl != float("inf") and hl == hl else "inf",
+                    "Log-lik": f"{loglik:,.1f}" if loglik == loglik else "-",
+                    "Parametre Notu": note,
+                })
+            st.dataframe(pd.DataFrame(rows_cmp), use_container_width=True, hide_index=True)
 
-        # Persistence bar chart
-        pers_vals = {m: r.get("persistence", 0) for m, r in model_results.items()}
-        fig_pers = go.Figure(go.Bar(
-            y=list(pers_vals.keys()),
-            x=list(pers_vals.values()),
-            orientation="h",
-            marker_color=[MODEL_COLORS.get(m, COLORS[0]) for m in pers_vals],
-        ))
-        fig_pers.add_vline(x=1.0, line_dash="dash", line_color="#f87171",
-                           annotation_text="a+b=1 (sonsuz bellek)", annotation_font_color="#f87171")
-        fig_pers.update_layout(
-            template=PLOT_TEMPLATE, height=280,
-            title="Model Kaliciligi (alpha + beta)",
-            xaxis_title="Kalicilik", xaxis=dict(range=[0, 1.05]),
-            margin=dict(l=20, r=20, t=50, b=30),
-        )
-        st.plotly_chart(fig_pers, use_container_width=True)
+            # Persistence bar chart
+            pers_vals = {m: r.get("persistence", 0) for m, r in model_results.items()}
+            fig_pers = go.Figure(go.Bar(
+                y=list(pers_vals.keys()),
+                x=list(pers_vals.values()),
+                orientation="h",
+                marker_color=[MODEL_COLORS.get(m, COLORS[0]) for m in pers_vals],
+            ))
+            fig_pers.add_vline(x=1.0, line_dash="dash", line_color="#f87171",
+                               annotation_text="a+b=1 (sonsuz bellek)", annotation_font_color="#f87171")
+            fig_pers.update_layout(
+                template=PLOT_TEMPLATE, height=280,
+                title="Model Kaliciligi (alpha + beta)",
+                xaxis_title="Kalicilik", xaxis=dict(range=[0, 1.05]),
+                margin=dict(l=20, r=20, t=50, b=30),
+            )
+            st.plotly_chart(fig_pers, use_container_width=True)
 
-        # Insight cards
-        st.markdown("**Temel Icgoruler**")
-        ic1, ic2, ic3 = st.columns(3)
-        with ic1:
-            if "HEAVY" in model_results:
-                p_h = model_results["HEAVY"].get("persistence", 0)
-                p_g = model_results.get("GARCH(1,1) baseline", {}).get("persistence", 0)
-                cmp = f"GARCH: {p_g:.3f} vs HEAVY: {p_h:.3f}" if p_g else f"Kalicilik: {p_h:.3f}"
-                st.markdown(_insight_card(
-                    f"<strong>HEAVY Modeli</strong><br>{cmp}<br>"
-                    "RV'yi doğrudan kullanan HEAVY, GARCH'a göre yeni oynaklk bilgisine daha hızlı tepki verir.",
-                    COLORS[0]
-                ), unsafe_allow_html=True)
-        with ic2:
-            if "GARCH-X" in model_results:
-                gv = model_results["GARCH-X"]["params"].get("gamma", 0)
-                tv = model_results["GARCH-X"].get("gamma_tstat", float("nan"))
-                tv_str = f"{tv:.2f}" if tv == tv else "NaN"
-                sig = "ANLAMLI" if (tv == tv and abs(tv) > 1.96) else "anlamlsiz"
-                st.markdown(_insight_card(
-                    f"<strong>GARCH-X</strong><br>gamma={gv:.5f} (t={tv_str}) => {sig}<br>"
-                    "gamma>0 ve anlamliysa RV, getiri karesinin otesinde ek bilgi tasir.",
-                    COLORS[1]
-                ), unsafe_allow_html=True)
-        with ic3:
-            if "Realized GARCH" in model_results:
-                tau1 = model_results["Realized GARCH"].get("leverage_tau1", float("nan"))
-                lev = "Kaldirac etkisi var (tau1<0)" if (tau1 == tau1 and tau1 < 0) else "Kaldirac etkisi zayif"
-                tau_str = f"{tau1:.3f}" if tau1 == tau1 else "NaN"
-                st.markdown(_insight_card(
-                    f"<strong>Realized GARCH</strong><br>tau1={tau_str} => {lev}<br>"
-                    "İki denklemli sistem: ölçüm hatasini ve asimetriyi birlikte modeller.",
-                    COLORS[2]
-                ), unsafe_allow_html=True)
+            # Insight cards
+            st.markdown("**Temel Icgoruler**")
+            ic1, ic2, ic3 = st.columns(3)
+            with ic1:
+                if "HEAVY" in model_results:
+                    p_h = model_results["HEAVY"].get("persistence", 0)
+                    p_g = model_results.get("GARCH(1,1) baseline", {}).get("persistence", 0)
+                    cmp = f"GARCH: {p_g:.3f} vs HEAVY: {p_h:.3f}" if p_g else f"Kalicilik: {p_h:.3f}"
+                    st.markdown(_insight_card(
+                        f"<strong>HEAVY Modeli</strong><br>{cmp}<br>"
+                        "RV'yi doğrudan kullanan HEAVY, GARCH'a göre yeni oynaklk bilgisine daha hızlı tepki verir.",
+                        COLORS[0]
+                    ), unsafe_allow_html=True)
+            with ic2:
+                if "GARCH-X" in model_results:
+                    gv = model_results["GARCH-X"]["params"].get("gamma", 0)
+                    tv = model_results["GARCH-X"].get("gamma_tstat", float("nan"))
+                    tv_str = f"{tv:.2f}" if tv == tv else "NaN"
+                    sig = "ANLAMLI" if (tv == tv and abs(tv) > 1.96) else "anlamlsiz"
+                    st.markdown(_insight_card(
+                        f"<strong>GARCH-X</strong><br>gamma={gv:.5f} (t={tv_str}) => {sig}<br>"
+                        "gamma>0 ve anlamliysa RV, getiri karesinin otesinde ek bilgi tasir.",
+                        COLORS[1]
+                    ), unsafe_allow_html=True)
+            with ic3:
+                if "Realized GARCH" in model_results:
+                    tau1 = model_results["Realized GARCH"].get("leverage_tau1", float("nan"))
+                    lev = "Kaldirac etkisi var (tau1<0)" if (tau1 == tau1 and tau1 < 0) else "Kaldirac etkisi zayif"
+                    tau_str = f"{tau1:.3f}" if tau1 == tau1 else "NaN"
+                    st.markdown(_insight_card(
+                        f"<strong>Realized GARCH</strong><br>tau1={tau_str} => {lev}<br>"
+                        "İki denklemli sistem: ölçüm hatasini ve asimetriyi birlikte modeller.",
+                        COLORS[2]
+                    ), unsafe_allow_html=True)
+        except _NoCompute:
+            pass
 
     # =========================================================================
     # TAB 5: Büyük Boyut Kovaryans
     # =========================================================================
     with tab_cov:
-        st.markdown("### Büyük Boyut Kovaryans Tahmini")
-        df = st.session_state.returns_df
-        ac = _asset_cols(df)
-        max_n = min(len(ac), 8)
-        df_key = id(df)
+        try:
+            st.markdown("### Büyük Boyut Kovaryans Tahmini")
+            df = st.session_state.returns_df
+            ac = _asset_cols(df)
+            max_n = min(len(ac), 8)
+            df_key = id(df)
 
-        col_a, col_b, col_c = st.columns(3)
-        with col_a:
-            n_assets_cov = st.slider("Varlık Sayisi", 2, max_n, min(5, max_n), key="cov5_n")
-        with col_b:
-            k_max = max(1, n_assets_cov - 1)
-            k_factors = st.slider("Faktor Sayisi (POET)", 1, k_max, min(3, k_max), key="cov5_k")
-        with col_c:
-            threshold = st.slider("Esik (POET)", 0.01, 0.50, 0.10, 0.01, key="cov5_thr")
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                n_assets_cov = st.slider("Varlık Sayisi", 2, max_n, min(5, max_n), key="cov5_n")
+            with col_b:
+                k_max = max(1, n_assets_cov - 1)
+                k_factors = st.slider("Faktor Sayisi (POET)", 1, k_max, min(3, k_max), key="cov5_k")
+            with col_c:
+                threshold = st.slider("Esik (POET)", 0.01, 0.50, 0.10, 0.01, key="cov5_thr")
 
-        with st.spinner("Kovaryans matrisleri hesaplaniyor..."):
-            (
-                sample_cov, poet_cov_mat, lw_cov_mat,
-                shrinkage, cols, returns_sub, eigs_corr,
-            ) = _cached_covariance(n_assets_cov, k_factors, threshold, df_key)
+            # Cache key
+            _key = f"d5_cov_{n_assets_cov}_{k_factors}_{threshold}_{df_key}"
 
-        from realized_volatility import marchenko_pastur_threshold as _mp_thresh
-        T_obs = len(returns_sub)
-        kappa = n_assets_cov / T_obs
-        mp_info = _mp_thresh(n_assets_cov, T_obs, sigma2=1.0, eigenvalues=eigs_corr)
-        n_signal = mp_info["n_signal_eigenvalues"] or 0
-        n_noise = n_assets_cov - n_signal
+            # Button
+            if st.button("🔄 Hesapla", key="d5_cov_run", type="primary"):
+                with st.spinner("Kovaryans matrisleri hesaplaniyor..."):
+                    try:
+                        st.session_state[_key] = _cached_covariance(n_assets_cov, k_factors, threshold, df_key)
+                    except Exception as _exc:
+                        st.error(f"Hata: `{_exc}`")
+                        raise _NoCompute
 
-        st.markdown(
-            f"LW buzulme yogunlugu delta = **{shrinkage:.4f}** | "
-            f"kappa = N/T = {n_assets_cov}/{T_obs} = **{kappa:.4f}** | "
-            f"MP lambda+ = **{mp_info['lambda_plus']:.4f}**"
-        )
+            # Gate
+            if _key not in st.session_state:
+                st.info("⬆️ Parametreleri seçip **🔄 Hesapla**'ya tıklayın.")
+                raise _NoCompute
 
-        # Marchenko-Pastur eigenvalue plot
-        st.markdown("#### Marchenko-Pastur Sınıri & Oz Değer Spektrumu")
-        eig_colors = [
-            "#a78bfa" if v > mp_info["lambda_plus"] else "#6b7280"
-            for v in eigs_corr
-        ]
-        fig_mp = go.Figure()
-        fig_mp.add_trace(go.Scatter(
-            x=list(range(1, n_assets_cov + 1)), y=list(eigs_corr),
-            mode="markers",
-            marker=dict(color=eig_colors, size=12, symbol="circle"),
-            name="Oz Değerler",
-        ))
-        fig_mp.add_hline(
-            y=mp_info["lambda_plus"], line_dash="dash", line_color="#fbbf24", line_width=2,
-            annotation_text=f"lambda+ = {mp_info['lambda_plus']:.3f} (MP ust sınır)",
-            annotation_position="top right", annotation_font_color="#fbbf24",
-        )
-        fig_mp.add_hline(
-            y=mp_info["lambda_minus"], line_dash="dot", line_color="#94a3b8", line_width=1.2,
-            annotation_text=f"lambda- = {mp_info['lambda_minus']:.3f}",
-            annotation_position="bottom right", annotation_font_color="#94a3b8",
-        )
-        fig_mp.update_layout(
-            template=PLOT_TEMPLATE, height=380,
-            title=f"Korelasyon Matrisi Oz Değerleri -- {n_signal} sinyal (mor), {n_noise} gürültü (gri)",
-            xaxis_title="Oz Değer Sirasi", yaxis_title="Oz Değer Büyüklugu",
-            margin=dict(l=20, r=20, t=55, b=35),
-        )
-        st.plotly_chart(fig_mp, use_container_width=True)
+            sample_cov, poet_cov_mat, lw_cov_mat, shrinkage, cols, returns_sub, eigs_corr = st.session_state[_key]
 
-        # Heatmaps
-        st.markdown("#### Kovaryans Matrisi Isi Haritalari (Korelasyon Formunda)")
-        corr_sample = _cov_to_corr(sample_cov)
-        corr_poet = _cov_to_corr(poet_cov_mat)
-        corr_lw = _cov_to_corr(lw_cov_mat)
+            from realized_volatility import marchenko_pastur_threshold as _mp_thresh
+            T_obs = len(returns_sub)
+            kappa = n_assets_cov / T_obs
+            mp_info = _mp_thresh(n_assets_cov, T_obs, sigma2=1.0, eigenvalues=eigs_corr)
+            n_signal = mp_info["n_signal_eigenvalues"] or 0
+            n_noise = n_assets_cov - n_signal
 
-        fig_heat = make_subplots(
-            rows=1, cols=3,
-            subplot_titles=["Ornek Kovaryans", "POET", "Ledoit-Wolf"],
-            horizontal_spacing=0.04,
-        )
-        for col_i, mat in enumerate([corr_sample, corr_poet, corr_lw], start=1):
-            fig_heat.add_trace(
-                go.Heatmap(
-                    z=np.round(mat, 4), x=cols, y=cols,
-                    colorscale="RdBu_r", zmin=-1, zmax=1,
-                    showscale=(col_i == 3),
-                    colorbar=dict(x=1.02, title="Cor") if col_i == 3 else None,
-                ),
-                row=1, col=col_i,
+            st.markdown(
+                f"LW buzulme yogunlugu delta = **{shrinkage:.4f}** | "
+                f"kappa = N/T = {n_assets_cov}/{T_obs} = **{kappa:.4f}** | "
+                f"MP lambda+ = **{mp_info['lambda_plus']:.4f}**"
             )
-        fig_heat.update_layout(
-            template=PLOT_TEMPLATE, height=380,
-            title="Korelasyon Matrisi Karşılaştırması",
-            margin=dict(l=20, r=20, t=60, b=30),
-        )
-        st.plotly_chart(fig_heat, use_container_width=True)
 
-        # Condition number & Frobenius distance
-        st.markdown("**Matris Kalite Gostergeleri**")
-        rows_cond = []
-        for mname, cov_m in [("Ornek", sample_cov), ("POET", poet_cov_mat), ("Ledoit-Wolf", lw_cov_mat)]:
-            cond = np.linalg.cond(cov_m)
-            frob = np.linalg.norm(cov_m - sample_cov, "fro") if mname != "Ornek" else 0.0
-            rows_cond.append({
-                "Tahminci": mname,
-                "Kosul Sayisi": f"{cond:.2f}",
-                "Frobenius (ornekten uzaklik)": f"{frob:.6f}",
-            })
-        st.dataframe(pd.DataFrame(rows_cond), use_container_width=True, hide_index=True)
+            # Marchenko-Pastur eigenvalue plot
+            st.markdown("#### Marchenko-Pastur Sınıri & Oz Değer Spektrumu")
+            eig_colors = [
+                "#a78bfa" if v > mp_info["lambda_plus"] else "#6b7280"
+                for v in eigs_corr
+            ]
+            fig_mp = go.Figure()
+            fig_mp.add_trace(go.Scatter(
+                x=list(range(1, n_assets_cov + 1)), y=list(eigs_corr),
+                mode="markers",
+                marker=dict(color=eig_colors, size=12, symbol="circle"),
+                name="Oz Değerler",
+            ))
+            fig_mp.add_hline(
+                y=mp_info["lambda_plus"], line_dash="dash", line_color="#fbbf24", line_width=2,
+                annotation_text=f"lambda+ = {mp_info['lambda_plus']:.3f} (MP ust sınır)",
+                annotation_position="top right", annotation_font_color="#fbbf24",
+            )
+            fig_mp.add_hline(
+                y=mp_info["lambda_minus"], line_dash="dot", line_color="#94a3b8", line_width=1.2,
+                annotation_text=f"lambda- = {mp_info['lambda_minus']:.3f}",
+                annotation_position="bottom right", annotation_font_color="#94a3b8",
+            )
+            fig_mp.update_layout(
+                template=PLOT_TEMPLATE, height=380,
+                title=f"Korelasyon Matrisi Oz Değerleri -- {n_signal} sinyal (mor), {n_noise} gürültü (gri)",
+                xaxis_title="Oz Değer Sirasi", yaxis_title="Oz Değer Büyüklugu",
+                margin=dict(l=20, r=20, t=55, b=35),
+            )
+            st.plotly_chart(fig_mp, use_container_width=True)
 
-        # LW eigenvalue shrinkage visualization
-        st.markdown("**Ledoit-Wolf Buzulme: Oz Değer Karşılaştırması**")
-        eigs_sample_cov = np.sort(np.linalg.eigvalsh(sample_cov))[::-1]
-        eigs_lw_cov = np.sort(np.linalg.eigvalsh(lw_cov_mat))[::-1]
-        idx_r = list(range(1, n_assets_cov + 1))
-        fig_shrink = go.Figure()
-        fig_shrink.add_trace(go.Bar(
-            x=idx_r, y=list(eigs_sample_cov),
-            name="Ornek Oz Değerleri", marker_color=COLORS[3], opacity=0.7,
-        ))
-        fig_shrink.add_trace(go.Bar(
-            x=idx_r, y=list(eigs_lw_cov),
-            name="LW Buzulmus Oz Değerleri", marker_color=COLORS[0], opacity=0.85,
-        ))
-        fig_shrink.update_layout(
-            template=PLOT_TEMPLATE, height=280,
-            title=f"Oz Değer Buzulmesi -- delta = {shrinkage:.4f}",
-            xaxis_title="Oz Değer Sirasi", yaxis_title="Büyükluk",
-            barmode="group", margin=dict(l=20, r=20, t=50, b=30),
-        )
-        st.plotly_chart(fig_shrink, use_container_width=True)
+            # Heatmaps
+            st.markdown("#### Kovaryans Matrisi Isi Haritalari (Korelasyon Formunda)")
+            corr_sample = _cov_to_corr(sample_cov)
+            corr_poet = _cov_to_corr(poet_cov_mat)
+            corr_lw = _cov_to_corr(lw_cov_mat)
+
+            fig_heat = make_subplots(
+                rows=1, cols=3,
+                subplot_titles=["Ornek Kovaryans", "POET", "Ledoit-Wolf"],
+                horizontal_spacing=0.04,
+            )
+            for col_i, mat in enumerate([corr_sample, corr_poet, corr_lw], start=1):
+                fig_heat.add_trace(
+                    go.Heatmap(
+                        z=np.round(mat, 4), x=cols, y=cols,
+                        colorscale="RdBu_r", zmin=-1, zmax=1,
+                        showscale=(col_i == 3),
+                        colorbar=dict(x=1.02, title="Cor") if col_i == 3 else None,
+                    ),
+                    row=1, col=col_i,
+                )
+            fig_heat.update_layout(
+                template=PLOT_TEMPLATE, height=380,
+                title="Korelasyon Matrisi Karşılaştırması",
+                margin=dict(l=20, r=20, t=60, b=30),
+            )
+            st.plotly_chart(fig_heat, use_container_width=True)
+
+            # Condition number & Frobenius distance
+            st.markdown("**Matris Kalite Gostergeleri**")
+            rows_cond = []
+            for mname, cov_m in [("Ornek", sample_cov), ("POET", poet_cov_mat), ("Ledoit-Wolf", lw_cov_mat)]:
+                cond = np.linalg.cond(cov_m)
+                frob = np.linalg.norm(cov_m - sample_cov, "fro") if mname != "Ornek" else 0.0
+                rows_cond.append({
+                    "Tahminci": mname,
+                    "Kosul Sayisi": f"{cond:.2f}",
+                    "Frobenius (ornekten uzaklik)": f"{frob:.6f}",
+                })
+            st.dataframe(pd.DataFrame(rows_cond), use_container_width=True, hide_index=True)
+
+            # LW eigenvalue shrinkage visualization
+            st.markdown("**Ledoit-Wolf Buzulme: Oz Değer Karşılaştırması**")
+            eigs_sample_cov = np.sort(np.linalg.eigvalsh(sample_cov))[::-1]
+            eigs_lw_cov = np.sort(np.linalg.eigvalsh(lw_cov_mat))[::-1]
+            idx_r = list(range(1, n_assets_cov + 1))
+            fig_shrink = go.Figure()
+            fig_shrink.add_trace(go.Bar(
+                x=idx_r, y=list(eigs_sample_cov),
+                name="Ornek Oz Değerleri", marker_color=COLORS[3], opacity=0.7,
+            ))
+            fig_shrink.add_trace(go.Bar(
+                x=idx_r, y=list(eigs_lw_cov),
+                name="LW Buzulmus Oz Değerleri", marker_color=COLORS[0], opacity=0.85,
+            ))
+            fig_shrink.update_layout(
+                template=PLOT_TEMPLATE, height=280,
+                title=f"Oz Değer Buzulmesi -- delta = {shrinkage:.4f}",
+                xaxis_title="Oz Değer Sirasi", yaxis_title="Büyükluk",
+                barmode="group", margin=dict(l=20, r=20, t=50, b=30),
+            )
+            st.plotly_chart(fig_shrink, use_container_width=True)
+        except _NoCompute:
+            pass
 
     # =========================================================================
     # TAB 6: Entegre Analiz: HAR + POET MVP
     # =========================================================================
     with tab_integrated:
-        st.markdown("### Entegre Analiz: HAR-RV + Büyük Boyut Kovaryans + MVP Portföy")
-        df = st.session_state.returns_df
-        ac = _asset_cols(df)
-        max_n6 = min(len(ac), 8)
-        df_key = id(df)
+        try:
+            st.markdown("### Entegre Analiz: HAR-RV + Büyük Boyut Kovaryans + MVP Portföy")
+            df = st.session_state.returns_df
+            ac = _asset_cols(df)
+            max_n6 = min(len(ac), 8)
+            df_key = id(df)
 
-        col_a, col_b, col_c = st.columns(3)
-        with col_a:
-            n_int = st.slider("Varlık Sayisi", 3, max_n6, min(5, max_n6), key="int_n")
-        with col_b:
-            har_choice = st.selectbox("HAR Modeli", ["HAR-RV", "HAR-RV-J"], key="int_har")
-        with col_c:
-            cov_choice = st.selectbox("Kovaryans", ["POET", "Ledoit-Wolf", "Ornek"], key="int_cov")
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                n_int = st.slider("Varlık Sayisi", 3, max_n6, min(5, max_n6), key="int_n")
+            with col_b:
+                har_choice = st.selectbox("HAR Modeli", ["HAR-RV", "HAR-RV-J"], key="int_har")
+            with col_c:
+                cov_choice = st.selectbox("Kovaryans", ["POET", "Ledoit-Wolf", "Ornek"], key="int_cov")
 
-        int_assets = ac[:n_int]
+            int_assets = ac[:n_int]
 
-        # Step cards
-        st.markdown(_step_card(1, "HAR-RV ile Volatilite Tahmini",
-            f"Her varlık için {har_choice} modeli tahmin edilir; R2, beta_d, beta_w, beta_m gosterilir."),
-            unsafe_allow_html=True)
-        st.markdown(_step_card(2, "Kovaryans Matrisi Tahmini",
-            f"Secili yöntem: {cov_choice}. Günlük getiriler kullanilir."),
-            unsafe_allow_html=True)
-        st.markdown(_step_card(3, "MVP Ağırlıkları",
-            "w = Sigma^-1 * 1 / (1' * Sigma^-1 * 1) -- minimum varyans portföy."),
-            unsafe_allow_html=True)
-        st.markdown(_step_card(4, "Portföy VaR/ES",
-            "Portföy getirilerinden normal VaR ve ES hesaplanır."),
-            unsafe_allow_html=True)
-        st.markdown(_step_card(5, "Geriye Donuk Değerlendirme",
-            "Eşit ağırlık, Ornek-MVP, POET-MVP, LW-MVP portföyleri karşılaştırılır."),
-            unsafe_allow_html=True)
+            # Step cards
+            st.markdown(_step_card(1, "HAR-RV ile Volatilite Tahmini",
+                f"Her varlık için {har_choice} modeli tahmin edilir; R2, beta_d, beta_w, beta_m gosterilir."),
+                unsafe_allow_html=True)
+            st.markdown(_step_card(2, "Kovaryans Matrisi Tahmini",
+                f"Secili yöntem: {cov_choice}. Günlük getiriler kullanilir."),
+                unsafe_allow_html=True)
+            st.markdown(_step_card(3, "MVP Ağırlıkları",
+                "w = Sigma^-1 * 1 / (1' * Sigma^-1 * 1) -- minimum varyans portföy."),
+                unsafe_allow_html=True)
+            st.markdown(_step_card(4, "Portföy VaR/ES",
+                "Portföy getirilerinden normal VaR ve ES hesaplanır."),
+                unsafe_allow_html=True)
+            st.markdown(_step_card(5, "Geriye Donuk Değerlendirme",
+                "Eşit ağırlık, Ornek-MVP, POET-MVP, LW-MVP portföyleri karşılaştırılır."),
+                unsafe_allow_html=True)
 
-        st.divider()
+            st.divider()
 
-        # Step 1: HAR summaries
-        st.markdown("#### Adım 1 -- HAR-RV Özet")
-        har_rows = []
-        with st.spinner("HAR modelleri tahmin ediliyor..."):
-            for ast in int_assets:
-                try:
-                    res_h, _, _, _ = _cached_har(har_choice, ast, df_key)
-                    p = res_h.params
-                    har_rows.append({
-                        "Varlık": ast,
-                        "R2": f"{res_h.rsquared:.4f}",
-                        "beta_0 (sabit)": f"{float(p.iloc[0]):.6f}",
-                        "beta_d (günlük)": f"{float(p.iloc[1]):.4f}",
-                        "beta_w (haftalik)": f"{float(p.iloc[2]):.4f}",
-                        "beta_m (aylik)": f"{float(p.iloc[3]):.4f}" if len(p) > 3 else "-",
-                    })
-                except Exception as e:
-                    har_rows.append({"Varlık": ast, "R2": f"Hata: {e}"})
-        st.dataframe(pd.DataFrame(har_rows), use_container_width=True, hide_index=True)
+            # Cache key
+            _key = f"d5_int_{n_int}_{har_choice}_{df_key}"
 
-        # Step 2-3: Covariance + MVP weights
-        st.markdown("#### Adım 2-3 -- Kovaryans & MVP Ağırlıkları")
-        k_int = min(3, n_int - 1)
-        with st.spinner("Kovaryans & MVP ağırlıklar..."):
-            (
-                sample_cov_i, poet_cov_i, lw_cov_i,
-                shrink_i, cols_i, returns_sub_i, _,
-            ) = _cached_covariance(n_int, k_int, 0.10, df_key)
+            # Button
+            if st.button("🔄 Hesapla", key="d5_int_run", type="primary"):
+                with st.spinner("Entegre analiz hesaplaniyor..."):
+                    try:
+                        _har_rows = []
+                        for _ast in int_assets:
+                            try:
+                                _res_h, _, _, _ = _cached_har(har_choice, _ast, df_key)
+                                _p = _res_h.params
+                                _har_rows.append({
+                                    "Varlık": _ast,
+                                    "R2": f"{_res_h.rsquared:.4f}",
+                                    "beta_0 (sabit)": f"{float(_p.iloc[0]):.6f}",
+                                    "beta_d (günlük)": f"{float(_p.iloc[1]):.4f}",
+                                    "beta_w (haftalik)": f"{float(_p.iloc[2]):.4f}",
+                                    "beta_m (aylik)": f"{float(_p.iloc[3]):.4f}" if len(_p) > 3 else "-",
+                                })
+                            except Exception as _e:
+                                _har_rows.append({"Varlık": _ast, "R2": f"Hata: {_e}"})
+                        _k_int = min(3, n_int - 1)
+                        (
+                            _sample_cov_i, _poet_cov_i, _lw_cov_i,
+                            _shrink_i, _cols_i, _returns_sub_i, _,
+                        ) = _cached_covariance(n_int, _k_int, 0.10, df_key)
+                        st.session_state[_key] = {
+                            "har_rows": _har_rows,
+                            "sample_cov_i": _sample_cov_i,
+                            "poet_cov_i": _poet_cov_i,
+                            "lw_cov_i": _lw_cov_i,
+                            "shrink_i": _shrink_i,
+                            "cols_i": _cols_i,
+                            "returns_sub_i": _returns_sub_i,
+                        }
+                    except Exception as _exc:
+                        st.error(f"Hata: `{_exc}`")
+                        raise _NoCompute
 
-        cov_map = {
-            "POET": poet_cov_i,
-            "Ledoit-Wolf": lw_cov_i,
-            "Ornek": sample_cov_i,
-        }
-        selected_cov_mat = cov_map[cov_choice]
-        ones = np.ones(n_int)
-        reg = 1e-8 * np.eye(n_int)
-        H_inv = np.linalg.inv(selected_cov_mat + reg)
-        w_mvp = H_inv @ ones / (ones @ H_inv @ ones)
+            # Gate
+            if _key not in st.session_state:
+                st.info("⬆️ Parametreleri seçip **🔄 Hesapla**'ya tıklayın.")
+                raise _NoCompute
 
-        fig_w = go.Figure(go.Bar(
-            x=int_assets, y=list(w_mvp),
-            marker_color=[COLORS[i % len(COLORS)] for i in range(n_int)],
-        ))
-        fig_w.add_hline(
-            y=1.0 / n_int, line_dash="dot", line_color="#94a3b8",
-            annotation_text="Eşit ağırlık", annotation_font_color="#94a3b8"
-        )
-        fig_w.update_layout(
-            template=PLOT_TEMPLATE, height=280,
-            title=f"MVP Ağırlıkları -- {cov_choice}",
-            xaxis_title="Varlık", yaxis_title="Ağırlık",
-            margin=dict(l=20, r=20, t=50, b=30),
-        )
-        st.plotly_chart(fig_w, use_container_width=True)
+            _d = st.session_state[_key]
+            har_rows = _d["har_rows"]
+            sample_cov_i = _d["sample_cov_i"]
+            poet_cov_i = _d["poet_cov_i"]
+            lw_cov_i = _d["lw_cov_i"]
+            shrink_i = _d["shrink_i"]
+            cols_i = _d["cols_i"]
+            returns_sub_i = _d["returns_sub_i"]
 
-        # Step 4-5: Portfolio comparison
-        st.markdown("#### Adım 4-5 -- Portföy Performans Karşılaştırması")
+            # Step 1: HAR summaries
+            st.markdown("#### Adım 1 -- HAR-RV Özet")
+            st.dataframe(pd.DataFrame(har_rows), use_container_width=True, hide_index=True)
 
-        def _port_metrics(w_arr, ret_mat):
-            pr = ret_mat @ w_arr
-            ann_vol = float(np.std(pr) * np.sqrt(252) * 100)
-            sharpe = float(np.mean(pr) / np.std(pr) * np.sqrt(252)) if np.std(pr) > 0 else float("nan")
-            cum = np.cumprod(1 + pr)
-            roll_max = np.maximum.accumulate(cum)
-            dd = (cum - roll_max) / np.where(roll_max > 0, roll_max, 1)
-            max_dd = float(dd.min()) * 100
-            mu_p = float(np.mean(pr))
-            sig_p = float(np.std(pr))
-            var95 = -(mu_p - 1.6449 * sig_p) * 100
-            es95 = -(mu_p - sig_p * _sp_norm.pdf(_sp_norm.ppf(0.05)) / 0.05) * 100
-            return {
-                "Ann. Vol (%)": f"{ann_vol:.2f}",
-                "Sharpe": f"{sharpe:.3f}" if sharpe == sharpe else "-",
-                "Max DD (%)": f"{max_dd:.2f}",
-                "VaR 95% (%)": f"{var95:.3f}",
-                "ES 95% (%)": f"{es95:.3f}",
+            # Step 2-3: Covariance + MVP weights
+            st.markdown("#### Adım 2-3 -- Kovaryans & MVP Ağırlıkları")
+            cov_map = {
+                "POET": poet_cov_i,
+                "Ledoit-Wolf": lw_cov_i,
+                "Ornek": sample_cov_i,
             }
+            selected_cov_mat = cov_map[cov_choice]
+            ones = np.ones(n_int)
+            reg = 1e-8 * np.eye(n_int)
+            H_inv = np.linalg.inv(selected_cov_mat + reg)
+            w_mvp = H_inv @ ones / (ones @ H_inv @ ones)
 
-        rets_np = returns_sub_i.values
-        port_rows = []
-        port_series_dict = {}
-        w_eq = np.full(n_int, 1.0 / n_int)
-
-        for pname, pcov in [
-            ("Eşit Ağırlık", None),
-            ("Ornek-MVP",    sample_cov_i),
-            ("POET-MVP",     poet_cov_i),
-            ("LW-MVP",       lw_cov_i),
-        ]:
-            if pcov is None:
-                w_p = w_eq.copy()
-            else:
-                try:
-                    Hi = np.linalg.inv(pcov + reg)
-                    w_p = Hi @ ones / (ones @ Hi @ ones)
-                except np.linalg.LinAlgError:
-                    w_p = w_eq.copy()
-            m_metrics = _port_metrics(w_p, rets_np)
-            port_rows.append({"Portföy": pname, **m_metrics})
-            port_series_dict[pname] = rets_np @ w_p
-
-        st.dataframe(pd.DataFrame(port_rows), use_container_width=True, hide_index=True)
-
-        # Cumulative return chart
-        PORT_COLORS = {
-            "Eşit Ağırlık": "#94a3b8",
-            "Ornek-MVP":    COLORS[3],
-            "POET-MVP":     COLORS[0],
-            "LW-MVP":       COLORS[1],
-        }
-        fig_cum = go.Figure()
-        idx_ret = returns_sub_i.index
-        for pname, pret in port_series_dict.items():
-            cum_ret = np.cumprod(1 + pret)
-            fig_cum.add_trace(go.Scatter(
-                x=idx_ret, y=list(cum_ret),
-                mode="lines", name=pname,
-                line=dict(color=PORT_COLORS.get(pname, "#fff"), width=1.8),
+            fig_w = go.Figure(go.Bar(
+                x=int_assets, y=list(w_mvp),
+                marker_color=[COLORS[i % len(COLORS)] for i in range(n_int)],
             ))
-        fig_cum.update_layout(
-            template=PLOT_TEMPLATE, height=380,
-            title="Kumulatif Getiri Karşılaştırması (Statik MVP Ağırlıkları)",
-            xaxis_title="Tarih", yaxis_title="Kumulatif Getiri (1 = baslangic)",
-            margin=dict(l=20, r=20, t=55, b=35),
-            legend=dict(orientation="h", y=-0.22),
-        )
-        st.plotly_chart(fig_cum, use_container_width=True)
-        st.caption(
-            "Not: Ağırlıklar statik olup tum dönem kovaryansina dayanir. "
-            "Gerçekci bir backtest için kayan pencere yeniden dengeleme gereklidir."
-        )
+            fig_w.add_hline(
+                y=1.0 / n_int, line_dash="dot", line_color="#94a3b8",
+                annotation_text="Eşit ağırlık", annotation_font_color="#94a3b8"
+            )
+            fig_w.update_layout(
+                template=PLOT_TEMPLATE, height=280,
+                title=f"MVP Ağırlıkları -- {cov_choice}",
+                xaxis_title="Varlık", yaxis_title="Ağırlık",
+                margin=dict(l=20, r=20, t=50, b=30),
+            )
+            st.plotly_chart(fig_w, use_container_width=True)
+
+            # Step 4-5: Portfolio comparison
+            st.markdown("#### Adım 4-5 -- Portföy Performans Karşılaştırması")
+
+            def _port_metrics(w_arr, ret_mat):
+                pr = ret_mat @ w_arr
+                ann_vol = float(np.std(pr) * np.sqrt(252) * 100)
+                sharpe = float(np.mean(pr) / np.std(pr) * np.sqrt(252)) if np.std(pr) > 0 else float("nan")
+                cum = np.cumprod(1 + pr)
+                roll_max = np.maximum.accumulate(cum)
+                dd = (cum - roll_max) / np.where(roll_max > 0, roll_max, 1)
+                max_dd = float(dd.min()) * 100
+                mu_p = float(np.mean(pr))
+                sig_p = float(np.std(pr))
+                var95 = -(mu_p - 1.6449 * sig_p) * 100
+                es95 = -(mu_p - sig_p * _sp_norm.pdf(_sp_norm.ppf(0.05)) / 0.05) * 100
+                return {
+                    "Ann. Vol (%)": f"{ann_vol:.2f}",
+                    "Sharpe": f"{sharpe:.3f}" if sharpe == sharpe else "-",
+                    "Max DD (%)": f"{max_dd:.2f}",
+                    "VaR 95% (%)": f"{var95:.3f}",
+                    "ES 95% (%)": f"{es95:.3f}",
+                }
+
+            rets_np = returns_sub_i.values
+            port_rows = []
+            port_series_dict = {}
+            w_eq = np.full(n_int, 1.0 / n_int)
+
+            for pname, pcov in [
+                ("Eşit Ağırlık", None),
+                ("Ornek-MVP",    sample_cov_i),
+                ("POET-MVP",     poet_cov_i),
+                ("LW-MVP",       lw_cov_i),
+            ]:
+                if pcov is None:
+                    w_p = w_eq.copy()
+                else:
+                    try:
+                        Hi = np.linalg.inv(pcov + reg)
+                        w_p = Hi @ ones / (ones @ Hi @ ones)
+                    except np.linalg.LinAlgError:
+                        w_p = w_eq.copy()
+                m_metrics = _port_metrics(w_p, rets_np)
+                port_rows.append({"Portföy": pname, **m_metrics})
+                port_series_dict[pname] = rets_np @ w_p
+
+            st.dataframe(pd.DataFrame(port_rows), use_container_width=True, hide_index=True)
+
+            # Cumulative return chart
+            PORT_COLORS = {
+                "Eşit Ağırlık": "#94a3b8",
+                "Ornek-MVP":    COLORS[3],
+                "POET-MVP":     COLORS[0],
+                "LW-MVP":       COLORS[1],
+            }
+            fig_cum = go.Figure()
+            idx_ret = returns_sub_i.index
+            for pname, pret in port_series_dict.items():
+                cum_ret = np.cumprod(1 + pret)
+                fig_cum.add_trace(go.Scatter(
+                    x=idx_ret, y=list(cum_ret),
+                    mode="lines", name=pname,
+                    line=dict(color=PORT_COLORS.get(pname, "#fff"), width=1.8),
+                ))
+            fig_cum.update_layout(
+                template=PLOT_TEMPLATE, height=380,
+                title="Kumulatif Getiri Karşılaştırması (Statik MVP Ağırlıkları)",
+                xaxis_title="Tarih", yaxis_title="Kumulatif Getiri (1 = baslangic)",
+                margin=dict(l=20, r=20, t=55, b=35),
+                legend=dict(orientation="h", y=-0.22),
+            )
+            st.plotly_chart(fig_cum, use_container_width=True)
+            st.caption(
+                "Not: Ağırlıklar statik olup tum dönem kovaryansina dayanir. "
+                "Gerçekci bir backtest için kayan pencere yeniden dengeleme gereklidir."
+            )
+        except _NoCompute:
+            pass

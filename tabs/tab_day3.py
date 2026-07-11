@@ -28,6 +28,12 @@ COLORS = [
 HEATMAP_CMAP = "Viridis"
 
 
+# ─── SENTINEL ────────────────────────────────────────────────────────────────
+
+class _NoCompute(Exception):
+    """Raised inside a tab's try block to skip remaining display code."""
+
+
 # ---------------------------------------------------------------------------
 # Helper utilities
 # ---------------------------------------------------------------------------
@@ -455,7 +461,7 @@ def render():
         col1, col2 = st.columns(2)
 
         with col1:
-            with st.expander("DCC (Engle 2002)", expanded=True):
+            with st.expander("DCC (Engle 2002)", expanded=False):
                 st.markdown(r"""
 **Temel cerceve:**
 $$H_t = D_t R_t D_t$$
@@ -477,7 +483,7 @@ $$Q_t^* = \text{diag}(\sqrt{q_{11,t}},\ldots,\sqrt{q_{NN,t}})$$
 """)
 
         with col2:
-            with st.expander("cDCC (Aielli 2013)", expanded=True):
+            with st.expander("cDCC (Aielli 2013)", expanded=False):
                 st.markdown(r"""
 **Düzeltilmiş Q güncelleme:**
 $$Q_t = (1-a-b)\bar{Q} + a\,\tilde{z}_{t-1}\tilde{z}_{t-1}^\top + b\,Q_{t-1}$$
@@ -497,7 +503,7 @@ cDCC belirgin biçimde ayrışır.
         col3, col4 = st.columns(2)
 
         with col3:
-            with st.expander("ADCC (Cappiello et al. 2006)", expanded=True):
+            with st.expander("ADCC (Cappiello et al. 2006)", expanded=False):
                 st.markdown(r"""
 **Asimetrik Q güncelleme:**
 $$Q_t = (1-a-b)\bar{Q} - c\bar{N} + a\,z_{t-1}z_{t-1}^\top + b\,Q_{t-1} + c\,n_{t-1}n_{t-1}^\top$$
@@ -515,7 +521,7 @@ $c > 0$ bunu modelleştirir.
 """)
 
         with col4:
-            with st.expander("DECO (Engle-Kelly 2012)", expanded=True):
+            with st.expander("DECO (Engle-Kelly 2012)", expanded=False):
                 st.markdown(r"""
 **Ekikorelasyon (equicorrelation):**
 $$\rho_t = \frac{2}{N(N-1)}\sum_{i<j} R_{ij,t}^{\text{DCC}}$$
@@ -573,428 +579,490 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
 | **DECO** | a, b | $O(1)$ param., hızlı | Bilgi kaybi | Büyük ($N>50$) |
 """)
 
+        # ── Notebook indirme ─────────────────────────────────────────────────
+        st.divider()
+        try:
+            from pathlib import Path as _Path
+            _nb_path = _Path(__file__).parent.parent / "notebooks" / "gun3_dcc.ipynb"
+            if _nb_path.exists():
+                st.download_button(
+                    label="📥 Jupyter Not Defteri İndir (gun3_dcc.ipynb)",
+                    data=_nb_path.read_bytes(),
+                    file_name="gun3_dcc.ipynb",
+                    mime="application/json",
+                    use_container_width=True,
+                )
+        except Exception:
+            pass
+
     # =========================================================================
     # TAB 2 -- MODEL ESTIMATION
     # =========================================================================
     with tab_model:
-        st.markdown("### DCC / cDCC / ADCC Model Tahmini")
+        try:
+            st.markdown("### DCC / cDCC / ADCC Model Tahmini")
 
-        col_a, col_b = st.columns(2)
-        with col_a:
-            selected_assets = st.multiselect(
-                "Varlıklar",
-                asset_cols,
-                default=asset_cols[:3],
-                key="t2_assets",
-            )
-        with col_b:
-            model_type = st.selectbox(
-                "Model Türü",
-                ["DCC", "cDCC", "ADCC"],
-                key="t2_model",
-            )
+            col_a, col_b = st.columns(2)
+            with col_a:
+                selected_assets = st.multiselect(
+                    "Varlıklar",
+                    asset_cols,
+                    default=asset_cols[:3],
+                    key="t2_assets",
+                )
+            with col_b:
+                model_type = st.selectbox(
+                    "Model Türü",
+                    ["DCC", "cDCC", "ADCC"],
+                    key="t2_model",
+                )
 
-        if len(selected_assets) < 2:
-            st.warning("En az 2 varlık seçiniz.")
-            st.stop()
+            if len(selected_assets) < 2:
+                st.warning("En az 2 varlık seçiniz.")
+                raise _NoCompute
 
-        pairs = [
-            f"{selected_assets[i]} vs {selected_assets[j]}"
-            for i in range(len(selected_assets))
-            for j in range(i + 1, len(selected_assets))
-        ]
-        selected_pair = st.selectbox("Korelasyon Çifti Grafigi", pairs, key="t2_pair")
-
-        with st.spinner(f"{model_type} modeli tahmin ediliyor..."):
-            try:
-                result = _run_dcc_model(tuple(selected_assets), model_type, dh)
-            except Exception as exc:
-                st.error(f"Model tahmini başarısız oldu. Farklı varlık sayisi deneyin.\n\n`{exc}`")
-                st.stop()
-
-        stats = result["stats"]
-        params = result["params"]
-        corr_series = result["corr_series"]
-        sigmas = result["sigmas"]
-        idx = result["index"]
-        cols = result["cols"]
-        R_seq = np.asarray(result["R_seq"])
-        iu_h = np.triu_indices(len(cols), k=1)
-
-        is_adcc = (model_type == "ADCC")
-        alpha_v = stats["alpha"]
-        beta_v = stats["beta"]
-        c_v = stats.get("c_asym", 0.0)
-        persist = stats["persistence"]
-        hl = stats["half_life_days"]
-        mean_corr = stats["mean_corr"]
-
-        if is_adcc:
-            metric_defs = [
-                ("alpha (DCC alpha)", f"{alpha_v:.4f}", "Kısa dönem korelasyon tepkisi"),
-                ("beta (DCC beta)", f"{beta_v:.4f}", "Korelasyon kalıcılığı"),
-                ("c (Asimetri)", f"{c_v:.4f}", "Negatif şok etkisi"),
-                ("alpha + beta", f"{persist:.4f}", "1'e yakınsa yüksek kalıcılik"),
-                ("Yarı-Ömür (gün)", f"{hl:.1f}", "Korelasyon şokları"),
-                ("Ort. Korelasyon", f"{mean_corr:.4f}", "Zaman ortalaması"),
+            pairs = [
+                f"{selected_assets[i]} vs {selected_assets[j]}"
+                for i in range(len(selected_assets))
+                for j in range(i + 1, len(selected_assets))
             ]
-        else:
-            metric_defs = [
-                ("alpha (DCC alpha)", f"{alpha_v:.4f}", "Kısa dönem korelasyon tepkisi"),
-                ("beta (DCC beta)", f"{beta_v:.4f}", "Korelasyon kalıcılığı"),
-                ("alpha + beta", f"{persist:.4f}", "1'e yakınsa yüksek kalıcılik"),
-                ("Yarı-Ömür (gün)", f"{hl:.1f}", "Korelasyon şokları"),
-                ("Ort. Korelasyon", f"{mean_corr:.4f}", "Zaman ortalaması"),
-            ]
+            selected_pair = st.selectbox("Korelasyon Çifti Grafigi", pairs, key="t2_pair")
 
-        metric_cols = st.columns(len(metric_defs))
-        for mc, (lbl, val, tip) in zip(metric_cols, metric_defs):
-            with mc:
-                st.markdown(_metric_card(lbl, val, tip), unsafe_allow_html=True)
+            # ── Build cache key ──
+            _key = f"d3_model_{'_'.join(sorted(selected_assets))}_{model_type}_{dh}"
 
-        st.markdown("")
+            # ── Hesapla button ──
+            if st.button("🔄 Hesapla", key="d3_model_run", type="primary"):
+                with st.spinner(f"{model_type} modeli tahmin ediliyor..."):
+                    try:
+                        result = _run_dcc_model(tuple(selected_assets), model_type, dh)
+                        st.session_state[_key] = result
+                    except Exception as _exc:
+                        st.error(f"Model tahmini başarısız oldu: `{_exc}`")
+                        raise _NoCompute
 
-        pair_data = corr_series.get(selected_pair, np.array([]))
-        mean_rho = R_seq[:, iu_h[0], iu_h[1]].mean(axis=1)
-        fig_corr = go.Figure()
-        fig_corr.add_vrect(
-            x0=stress[0], x1=stress[1], fillcolor="gray", opacity=0.15, line_width=0,
-            annotation_text="stres", annotation_position="top left",
-        )
-        fig_corr.add_trace(go.Scatter(
-            x=idx, y=pair_data, mode="lines", name=selected_pair,
-            line=dict(color=COLORS[1], width=1.6),
-        ))
-        fig_corr.add_trace(go.Scatter(
-            x=idx, y=mean_rho, mode="lines", name="ortalama (tüm çiftler)",
-            line=dict(color=COLORS[4], width=1.4, dash="dot"),
-        ))
-        fig_corr.update_layout(
-            template=PLOT_TEMPLATE,
-            title=f"Dinamik Koşullu Korelasyon -- {selected_pair} ({model_type})",
-            xaxis_title="Tarih",
-            yaxis_title="Korelasyon rho",
-            height=380,
-            margin=dict(l=20, r=20, t=50, b=30),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        )
-        st.plotly_chart(fig_corr, use_container_width=True)
+            # ── Gate: require result ──
+            if _key not in st.session_state:
+                st.info("⬆️ Parametreleri seçip **🔄 Hesapla**'ya tıklayın.")
+                raise _NoCompute
 
-        # Koşullu korelasyon matrisi (anlık) -- ortak renk ölçeği (Viridis)
-        st.markdown("#### Koşullu Korelasyon Matrisi $R_t$ (anlık)")
-        zmin_hm = float(np.nanmin(R_seq[:, iu_h[0], iu_h[1]]))
-        snap = st.select_slider(
-            "Tarih (anlık matris)", options=list(range(len(idx))),
-            value=int(np.argmax(mean_rho)),
-            format_func=lambda i: str(pd.Timestamp(idx[i]).date()), key="t2_snap",
-        )
-        Rsnap = R_seq[snap]
-        fig_hm = go.Figure(go.Heatmap(
-            z=Rsnap, x=cols, y=cols, colorscale=HEATMAP_CMAP, zmin=zmin_hm, zmax=1.0,
-            text=np.round(Rsnap, 2), texttemplate="%{text}", textfont=dict(size=10),
-            colorbar=dict(title="rho"),
-        ))
-        fig_hm.update_layout(
-            template=PLOT_TEMPLATE,
-            title=f"R_t @ {pd.Timestamp(idx[snap]).date()}  "
-                  f"(ort. çift korelasyon = {mean_rho[snap]:.3f})",
-            height=430, yaxis=dict(autorange="reversed"),
-            margin=dict(l=20, r=20, t=50, b=30),
-        )
-        st.plotly_chart(fig_hm, use_container_width=True)
+            result = st.session_state[_key]
 
-        n_sel = len(cols)
-        fig_vol = make_subplots(rows=1, cols=n_sel, subplot_titles=cols, shared_yaxes=True)
-        for i, col in enumerate(cols):
-            fig_vol.add_trace(
-                go.Scatter(
-                    x=idx,
-                    y=sigmas[:, i] * 100,
-                    mode="lines",
-                    name=col,
-                    line=dict(color=COLORS[i % len(COLORS)], width=1.0),
-                ),
-                row=1, col=i + 1,
+            stats = result["stats"]
+            params = result["params"]
+            corr_series = result["corr_series"]
+            sigmas = result["sigmas"]
+            idx = result["index"]
+            cols = result["cols"]
+            R_seq = np.asarray(result["R_seq"])
+            iu_h = np.triu_indices(len(cols), k=1)
+
+            is_adcc = (model_type == "ADCC")
+            alpha_v = stats["alpha"]
+            beta_v = stats["beta"]
+            c_v = stats.get("c_asym", 0.0)
+            persist = stats["persistence"]
+            hl = stats["half_life_days"]
+            mean_corr = stats["mean_corr"]
+
+            if is_adcc:
+                metric_defs = [
+                    ("alpha (DCC alpha)", f"{alpha_v:.4f}", "Kısa dönem korelasyon tepkisi"),
+                    ("beta (DCC beta)", f"{beta_v:.4f}", "Korelasyon kalıcılığı"),
+                    ("c (Asimetri)", f"{c_v:.4f}", "Negatif şok etkisi"),
+                    ("alpha + beta", f"{persist:.4f}", "1'e yakınsa yüksek kalıcılik"),
+                    ("Yarı-Ömür (gün)", f"{hl:.1f}", "Korelasyon şokları"),
+                    ("Ort. Korelasyon", f"{mean_corr:.4f}", "Zaman ortalaması"),
+                ]
+            else:
+                metric_defs = [
+                    ("alpha (DCC alpha)", f"{alpha_v:.4f}", "Kısa dönem korelasyon tepkisi"),
+                    ("beta (DCC beta)", f"{beta_v:.4f}", "Korelasyon kalıcılığı"),
+                    ("alpha + beta", f"{persist:.4f}", "1'e yakınsa yüksek kalıcılik"),
+                    ("Yarı-Ömür (gün)", f"{hl:.1f}", "Korelasyon şokları"),
+                    ("Ort. Korelasyon", f"{mean_corr:.4f}", "Zaman ortalaması"),
+                ]
+
+            metric_cols = st.columns(len(metric_defs))
+            for mc, (lbl, val, tip) in zip(metric_cols, metric_defs):
+                with mc:
+                    st.markdown(_metric_card(lbl, val, tip), unsafe_allow_html=True)
+
+            st.markdown("")
+
+            pair_data = corr_series.get(selected_pair, np.array([]))
+            mean_rho = R_seq[:, iu_h[0], iu_h[1]].mean(axis=1)
+            fig_corr = go.Figure()
+            fig_corr.add_vrect(
+                x0=stress[0], x1=stress[1], fillcolor="gray", opacity=0.15, line_width=0,
+                annotation_text="stres", annotation_position="top left",
             )
-        fig_vol.update_layout(
-            template=PLOT_TEMPLATE,
-            title="Koşullu Standart Sapma (%) -- Marjinal GARCH(1,1)",
-            height=280,
-            showlegend=False,
-            margin=dict(l=20, r=20, t=50, b=30),
-        )
-        st.plotly_chart(fig_vol, use_container_width=True)
+            fig_corr.add_trace(go.Scatter(
+                x=idx, y=pair_data, mode="lines", name=selected_pair,
+                line=dict(color=COLORS[1], width=1.6),
+            ))
+            fig_corr.add_trace(go.Scatter(
+                x=idx, y=mean_rho, mode="lines", name="ortalama (tüm çiftler)",
+                line=dict(color=COLORS[4], width=1.4, dash="dot"),
+            ))
+            fig_corr.update_layout(
+                template=PLOT_TEMPLATE,
+                title=f"Dinamik Koşullu Korelasyon -- {selected_pair} ({model_type})",
+                xaxis_title="Tarih",
+                yaxis_title="Korelasyon rho",
+                height=380,
+                margin=dict(l=20, r=20, t=50, b=30),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_corr, use_container_width=True)
 
-        with st.expander("Tahmin Detayları"):
-            st.json({
-                "model_type": model_type,
-                "alpha": round(alpha_v, 6),
-                "beta": round(beta_v, 6),
-                "c_asym": round(c_v, 6),
-                "persistence": round(persist, 6),
-                "half_life_days": round(hl, 2),
-                "mean_corr": round(mean_corr, 6),
-                "n_assets": stats["n_assets"],
-                "n_obs": stats["n_obs"],
-            })
+            # Koşullu korelasyon matrisi (anlık) -- ortak renk ölçeği (Viridis)
+            st.markdown("#### Koşullu Korelasyon Matrisi $R_t$ (anlık)")
+            zmin_hm = float(np.nanmin(R_seq[:, iu_h[0], iu_h[1]]))
+            snap = st.select_slider(
+                "Tarih (anlık matris)", options=list(range(len(idx))),
+                value=int(np.argmax(mean_rho)),
+                format_func=lambda i: str(pd.Timestamp(idx[i]).date()), key="t2_snap",
+            )
+            Rsnap = R_seq[snap]
+            fig_hm = go.Figure(go.Heatmap(
+                z=Rsnap, x=cols, y=cols, colorscale=HEATMAP_CMAP, zmin=zmin_hm, zmax=1.0,
+                text=np.round(Rsnap, 2), texttemplate="%{text}", textfont=dict(size=10),
+                colorbar=dict(title="rho"),
+            ))
+            fig_hm.update_layout(
+                template=PLOT_TEMPLATE,
+                title=f"R_t @ {pd.Timestamp(idx[snap]).date()}  "
+                      f"(ort. çift korelasyon = {mean_rho[snap]:.3f})",
+                height=430, yaxis=dict(autorange="reversed"),
+                margin=dict(l=20, r=20, t=50, b=30),
+            )
+            st.plotly_chart(fig_hm, use_container_width=True)
+
+            n_sel = len(cols)
+            fig_vol = make_subplots(rows=1, cols=n_sel, subplot_titles=cols, shared_yaxes=True)
+            for i, col in enumerate(cols):
+                fig_vol.add_trace(
+                    go.Scatter(
+                        x=idx,
+                        y=sigmas[:, i] * 100,
+                        mode="lines",
+                        name=col,
+                        line=dict(color=COLORS[i % len(COLORS)], width=1.0),
+                    ),
+                    row=1, col=i + 1,
+                )
+            fig_vol.update_layout(
+                template=PLOT_TEMPLATE,
+                title="Koşullu Standart Sapma (%) -- Marjinal GARCH(1,1)",
+                height=280,
+                showlegend=False,
+                margin=dict(l=20, r=20, t=50, b=30),
+            )
+            st.plotly_chart(fig_vol, use_container_width=True)
+
+            with st.expander("Tahmin Detayları"):
+                st.json({
+                    "model_type": model_type,
+                    "alpha": round(alpha_v, 6),
+                    "beta": round(beta_v, 6),
+                    "c_asym": round(c_v, 6),
+                    "persistence": round(persist, 6),
+                    "half_life_days": round(hl, 2),
+                    "mean_corr": round(mean_corr, 6),
+                    "n_assets": stats["n_assets"],
+                    "n_obs": stats["n_obs"],
+                })
+        except _NoCompute:
+            pass
 
     # =========================================================================
     # TAB 3 -- DECO MODEL
     # =========================================================================
     with tab_deco:
-        st.markdown("### DECO -- Dinamik Ekikorelasyon Modeli")
+        try:
+            st.markdown("### DECO -- Dinamik Ekikorelasyon Modeli")
 
-        st.info(
-            "DECO, N>50 portföylerde DCC'yi asan hız avantajı sunar: "
-            "O(1) vs O(N^2) parametre. Tum çiftlerin ortalaması olan "
-            "tek bir rho_t serisi tahmin edilir."
-        )
-
-        col_da, col_db = st.columns(2)
-        with col_da:
-            deco_assets = st.multiselect(
-                "Varlıklar (DECO)",
-                asset_cols,
-                default=asset_cols,
-                key="t3_assets",
-            )
-        with col_db:
-            show_dcc_compare = st.checkbox(
-                "DCC ortalama korelasyonuyla karşılaştır",
-                value=True,
-                key="t3_compare",
+            st.info(
+                "DECO, N>50 portföylerde DCC'yi asan hız avantajı sunar: "
+                "O(1) vs O(N^2) parametre. Tum çiftlerin ortalaması olan "
+                "tek bir rho_t serisi tahmin edilir."
             )
 
-        if len(deco_assets) < 2:
-            st.warning("En az 2 varlık seçiniz.")
-            st.stop()
+            col_da, col_db = st.columns(2)
+            with col_da:
+                deco_assets = st.multiselect(
+                    "Varlıklar (DECO)",
+                    asset_cols,
+                    default=asset_cols,
+                    key="t3_assets",
+                )
+            with col_db:
+                show_dcc_compare = st.checkbox(
+                    "DCC ortalama korelasyonuyla karşılaştır",
+                    value=True,
+                    key="t3_compare",
+                )
 
-        with st.spinner("DECO modeli tahmin ediliyor..."):
-            try:
-                deco_res = _run_deco_model(tuple(deco_assets), dh)
-            except Exception as exc:
-                st.error(f"Model tahmini başarısız oldu. Farklı varlık sayisi deneyin.\n\n`{exc}`")
-                st.stop()
+            if len(deco_assets) < 2:
+                st.warning("En az 2 varlık seçiniz.")
+                raise _NoCompute
 
-        rho = deco_res["rho_series"]
-        deco_idx = deco_res["index"]
-        sample_mean = deco_res["sample_mean_corr"]
-        dcc_mean_corr = deco_res["dcc_rho_series"]
-        deco_stats = deco_res["stats"]
+            # ── Build cache key ──
+            _key = f"d3_deco_{'_'.join(sorted(deco_assets))}_{dh}"
 
-        roll_win = 60
-        rho_roll = pd.Series(rho, index=deco_idx).rolling(roll_win, min_periods=1).mean().values
+            # ── Hesapla button ──
+            if st.button("🔄 Hesapla", key="d3_deco_run", type="primary"):
+                with st.spinner("DECO modeli tahmin ediliyor..."):
+                    try:
+                        deco_res = _run_deco_model(tuple(deco_assets), dh)
+                        st.session_state[_key] = deco_res
+                    except Exception as _exc:
+                        st.error(f"Model tahmini başarısız oldu: `{_exc}`")
+                        raise _NoCompute
 
-        fig_rho = go.Figure()
-        fig_rho.add_trace(go.Scatter(
-            x=deco_idx, y=rho,
-            mode="lines",
-            name="DECO rho_t",
-            line=dict(color=COLORS[0], width=1.2),
-            fill="tozeroy",
-            fillcolor="rgba(167,139,250,0.08)",
-        ))
-        fig_rho.add_trace(go.Scatter(
-            x=deco_idx, y=rho_roll,
-            mode="lines",
-            name=f"{roll_win}g kayan ort.",
-            line=dict(color=COLORS[1], width=1.8, dash="dash"),
-        ))
-        fig_rho.add_hline(
-            y=sample_mean,
-            line_dash="dot",
-            line_color=COLORS[3],
-            annotation_text=f"Ornek ort. kor. ({sample_mean:.3f})",
-            annotation_position="bottom right",
-        )
-        fig_rho.update_layout(
-            template=PLOT_TEMPLATE,
-            title="DECO Ekikorelasyon Serisi rho_t",
-            xaxis_title="Tarih",
-            yaxis_title="rho_t",
-            height=380,
-            margin=dict(l=20, r=20, t=50, b=30),
-        )
-        st.plotly_chart(fig_rho, use_container_width=True)
+            # ── Gate: require result ──
+            if _key not in st.session_state:
+                st.info("⬆️ Parametreleri seçip **🔄 Hesapla**'ya tıklayın.")
+                raise _NoCompute
 
-        if show_dcc_compare:
-            fig_cmp = go.Figure()
-            fig_cmp.add_trace(go.Scatter(
+            deco_res = st.session_state[_key]
+
+            rho = deco_res["rho_series"]
+            deco_idx = deco_res["index"]
+            sample_mean = deco_res["sample_mean_corr"]
+            dcc_mean_corr = deco_res["dcc_rho_series"]
+            deco_stats = deco_res["stats"]
+
+            roll_win = 60
+            rho_roll = pd.Series(rho, index=deco_idx).rolling(roll_win, min_periods=1).mean().values
+
+            fig_rho = go.Figure()
+            fig_rho.add_trace(go.Scatter(
                 x=deco_idx, y=rho,
                 mode="lines",
                 name="DECO rho_t",
-                line=dict(color=COLORS[0], width=1.4),
+                line=dict(color=COLORS[0], width=1.2),
+                fill="tozeroy",
+                fillcolor="rgba(167,139,250,0.08)",
             ))
-            fig_cmp.add_trace(go.Scatter(
-                x=deco_idx, y=dcc_mean_corr,
+            fig_rho.add_trace(go.Scatter(
+                x=deco_idx, y=rho_roll,
                 mode="lines",
-                name="DCC ortalama rho_t",
-                line=dict(color=COLORS[2], width=1.4, dash="dash"),
+                name=f"{roll_win}g kayan ort.",
+                line=dict(color=COLORS[1], width=1.8, dash="dash"),
             ))
-            fig_cmp.update_layout(
+            fig_rho.add_hline(
+                y=sample_mean,
+                line_dash="dot",
+                line_color=COLORS[3],
+                annotation_text=f"Ornek ort. kor. ({sample_mean:.3f})",
+                annotation_position="bottom right",
+            )
+            fig_rho.update_layout(
                 template=PLOT_TEMPLATE,
-                title="DECO vs DCC Ortalama Korelasyon Karşılaştırması",
+                title="DECO Ekikorelasyon Serisi rho_t",
                 xaxis_title="Tarih",
-                yaxis_title="Ortalama Korelasyon",
-                height=280,
+                yaxis_title="rho_t",
+                height=380,
                 margin=dict(l=20, r=20, t=50, b=30),
             )
-            st.plotly_chart(fig_cmp, use_container_width=True)
+            st.plotly_chart(fig_rho, use_container_width=True)
 
-        st.markdown("#### DECO Parametre Özeti")
-        deco_a = deco_stats["alpha"]
-        deco_b = deco_stats["beta"]
-        deco_p = deco_stats["persistence"]
-        deco_hl = deco_stats["half_life_days"]
-        deco_mc = deco_stats["mean_corr"]
+            if show_dcc_compare:
+                fig_cmp = go.Figure()
+                fig_cmp.add_trace(go.Scatter(
+                    x=deco_idx, y=rho,
+                    mode="lines",
+                    name="DECO rho_t",
+                    line=dict(color=COLORS[0], width=1.4),
+                ))
+                fig_cmp.add_trace(go.Scatter(
+                    x=deco_idx, y=dcc_mean_corr,
+                    mode="lines",
+                    name="DCC ortalama rho_t",
+                    line=dict(color=COLORS[2], width=1.4, dash="dash"),
+                ))
+                fig_cmp.update_layout(
+                    template=PLOT_TEMPLATE,
+                    title="DECO vs DCC Ortalama Korelasyon Karşılaştırması",
+                    xaxis_title="Tarih",
+                    yaxis_title="Ortalama Korelasyon",
+                    height=280,
+                    margin=dict(l=20, r=20, t=50, b=30),
+                )
+                st.plotly_chart(fig_cmp, use_container_width=True)
 
-        deco_table = pd.DataFrame([{
-            "Model": "DECO",
-            "alpha": f"{deco_a:.4f}",
-            "beta": f"{deco_b:.4f}",
-            "alpha+beta": f"{deco_p:.4f}",
-            "Yarı-Ömür (gün)": f"{deco_hl:.1f}",
-            "Ort. Ekikorelasyon": f"{deco_mc:.4f}",
-            "Ornek Ort. Korelasyon": f"{sample_mean:.4f}",
-        }])
-        st.dataframe(deco_table, use_container_width=True, hide_index=True)
+            st.markdown("#### DECO Parametre Özeti")
+            deco_a = deco_stats["alpha"]
+            deco_b = deco_stats["beta"]
+            deco_p = deco_stats["persistence"]
+            deco_hl = deco_stats["half_life_days"]
+            deco_mc = deco_stats["mean_corr"]
 
-        st.markdown("""
+            deco_table = pd.DataFrame([{
+                "Model": "DECO",
+                "alpha": f"{deco_a:.4f}",
+                "beta": f"{deco_b:.4f}",
+                "alpha+beta": f"{deco_p:.4f}",
+                "Yarı-Ömür (gün)": f"{deco_hl:.1f}",
+                "Ort. Ekikorelasyon": f"{deco_mc:.4f}",
+                "Ornek Ort. Korelasyon": f"{sample_mean:.4f}",
+            }])
+            st.dataframe(deco_table, use_container_width=True, hide_index=True)
+
+            st.markdown("""
 **Temel Bulgular:**
 - N buyudukce DECO'nun hesaplama avantajı belirginlesir.
 - rho_t'nin yüksek oldugu dönemler piyasa krizlerine işaret eder.
 - DECO, tek bir skaler korelasyon varsayımı yaptıgından portföy
   çeşitlendirme stratejilerinde muhafazakar bir alt sınır sunar.
 """)
+        except _NoCompute:
+            pass
 
     # =========================================================================
     # TAB 4 -- MODEL COMPARISON
     # =========================================================================
     with tab_compare:
-        st.markdown("### Model Karşılaştırması: DCC, cDCC, DECO")
-        st.caption("Hız için sabit 3 varlık önerilir; aşağıdan değiştirebilirsiniz.")
-
-        cmp_assets = st.multiselect(
-            "Karşılaştırma İçin Varlıklar (önerilen: 3)",
-            asset_cols,
-            default=asset_cols[:3],
-            key="t4_assets",
-        )
-
-        if len(cmp_assets) < 2:
-            st.warning("En az 2 varlık seçiniz.")
-            st.stop()
-
-        with st.spinner("DCC, cDCC ve DECO tahmin ediliyor..."):
-            try:
-                cmp_results = _run_comparison(tuple(cmp_assets), dh)
-            except Exception as exc:
-                st.error(f"Model tahmini başarısız oldu. Farklı varlık sayisi deneyin.\n\n`{exc}`")
-                st.stop()
-
-        rows = []
-        for mtype, s in cmp_results.items():
-            rows.append({
-                "Model": mtype,
-                "alpha": round(s["alpha"], 4),
-                "beta": round(s["beta"], 4),
-                "alpha+beta": round(s["persistence"], 4),
-                "Yarı-Ömür (gün)": round(s["half_life_days"], 1),
-                "Ort. Korelasyon": round(s["mean_corr"], 4),
-            })
-
-        df_cmp = pd.DataFrame(rows)
-        st.markdown("#### Parametre Karşılaştırması")
-
-        def _highlight_persist(val):
-            try:
-                v = float(val)
-                if v > 0.98:
-                    return "color: #f472b6; font-weight: 700"
-                if v > 0.95:
-                    return "color: #fbbf24"
-                return "color: #34d399"
-            except Exception:
-                return ""
-
-        st.dataframe(
-            df_cmp.style.map(_highlight_persist, subset=["alpha+beta"]),
-            use_container_width=True,
-            hide_index=True,
-        )
-
-        fig_bar = go.Figure(go.Bar(
-            x=[r["Model"] for r in rows],
-            y=[r["Ort. Korelasyon"] for r in rows],
-            marker_color=COLORS[:len(rows)],
-            text=[f"{r['Ort. Korelasyon']:.4f}" for r in rows],
-            textposition="outside",
-        ))
-        fig_bar.update_layout(
-            template=PLOT_TEMPLATE,
-            title="Modellere Gore Ortalama Çift Korelasyon",
-            xaxis_title="Model",
-            yaxis_title="Ortalama Korelasyon",
-            height=280,
-            margin=dict(l=20, r=20, t=50, b=30),
-        )
-        st.plotly_chart(fig_bar, use_container_width=True)
-
-        fig_hl = go.Figure(go.Bar(
-            x=[r["Model"] for r in rows],
-            y=[r["Yarı-Ömür (gün)"] for r in rows],
-            marker_color=[COLORS[(i + 3) % len(COLORS)] for i in range(len(rows))],
-            text=[f"{r['Yarı-Ömür (gün)']:.1f} gün" for r in rows],
-            textposition="outside",
-        ))
-        fig_hl.update_layout(
-            template=PLOT_TEMPLATE,
-            title="Korelasyon Soku Yarı-Ömür Karşılaştırması",
-            xaxis_title="Model",
-            yaxis_title="Yarı-Ömür (gün)",
-            height=280,
-            margin=dict(l=20, r=20, t=50, b=30),
-        )
-        st.plotly_chart(fig_hl, use_container_width=True)
-
-        # DCC vs ADCC: asimetri etkisi (ortalama koşullu korelasyon ve farkı)
-        st.markdown("#### DCC vs ADCC: Asimetri Etkisi")
         try:
-            res_d = _run_dcc_model(tuple(cmp_assets), "DCC", dh)
-            res_a = _run_dcc_model(tuple(cmp_assets), "ADCC", dh)
-            iu_c = np.triu_indices(len(cmp_assets), k=1)
-            Rd = np.asarray(res_d["R_seq"]); Ra = np.asarray(res_a["R_seq"])
-            mD = Rd[:, iu_c[0], iu_c[1]].mean(axis=1)
-            mA = Ra[:, iu_c[0], iu_c[1]].mean(axis=1)
-            cidx = res_d["index"]
-            fig_da = make_subplots(
-                rows=2, cols=1, shared_xaxes=True, row_heights=[0.62, 0.38],
-                vertical_spacing=0.09,
-                subplot_titles=("Ortalama koşullu korelasyon", "Fark (ADCC - DCC)"),
-            )
-            for _fr in (1, 2):
-                fig_da.add_vrect(x0=stress[0], x1=stress[1], fillcolor="gray",
-                                 opacity=0.15, line_width=0, row=_fr, col=1)
-            fig_da.add_trace(go.Scatter(x=cidx, y=mD, name="DCC",
-                                        line=dict(color=COLORS[7], width=1.4)), row=1, col=1)
-            fig_da.add_trace(go.Scatter(x=cidx, y=mA, name="ADCC",
-                                        line=dict(color=COLORS[2], width=1.4)), row=1, col=1)
-            fig_da.add_trace(go.Scatter(x=cidx, y=(mA - mD), name="ADCC - DCC", fill="tozeroy",
-                                        line=dict(color=COLORS[2], width=1.0),
-                                        showlegend=False), row=2, col=1)
-            fig_da.add_hline(y=0.0, line_color="gray", line_width=0.7, row=2, col=1)
-            fig_da.update_layout(
-                template=PLOT_TEMPLATE, height=460, margin=dict(l=20, r=20, t=50, b=30),
-                legend=dict(orientation="h", yanchor="bottom", y=1.04, xanchor="right", x=1),
-            )
-            st.plotly_chart(fig_da, use_container_width=True)
-            st.caption("ADCC, ortak düşüşlerdeki asimetri (c>0) nedeniyle kriz ve sonrasında "
-                       "sistematik olarak daha yüksek korelasyon üretir.")
-        except Exception as exc:
-            st.info(f"DCC/ADCC karşılaştırması hesaplanamadı: `{exc}`")
+            st.markdown("### Model Karşılaştırması: DCC, cDCC, DECO")
+            st.caption("Hız için sabit 3 varlık önerilir; aşağıdan değiştirebilirsiniz.")
 
-        st.markdown("#### Hangi Modeli Ne Zaman Kullanmalı?")
-        st.markdown(r"""
+            cmp_assets = st.multiselect(
+                "Karşılaştırma İçin Varlıklar (önerilen: 3)",
+                asset_cols,
+                default=asset_cols[:3],
+                key="t4_assets",
+            )
+
+            if len(cmp_assets) < 2:
+                st.warning("En az 2 varlık seçiniz.")
+                raise _NoCompute
+
+            # ── Build cache key ──
+            _key = f"d3_cmp_{'_'.join(sorted(cmp_assets))}_{dh}"
+
+            # ── Hesapla button ──
+            if st.button("🔄 Hesapla", key="d3_cmp_run", type="primary"):
+                with st.spinner("DCC, cDCC ve DECO tahmin ediliyor..."):
+                    try:
+                        cmp_results = _run_comparison(tuple(cmp_assets), dh)
+                        st.session_state[_key] = cmp_results
+                    except Exception as _exc:
+                        st.error(f"Model tahmini başarısız oldu: `{_exc}`")
+                        raise _NoCompute
+
+            # ── Gate: require result ──
+            if _key not in st.session_state:
+                st.info("⬆️ Parametreleri seçip **🔄 Hesapla**'ya tıklayın.")
+                raise _NoCompute
+
+            cmp_results = st.session_state[_key]
+
+            rows = []
+            for mtype, s in cmp_results.items():
+                rows.append({
+                    "Model": mtype,
+                    "alpha": round(s["alpha"], 4),
+                    "beta": round(s["beta"], 4),
+                    "alpha+beta": round(s["persistence"], 4),
+                    "Yarı-Ömür (gün)": round(s["half_life_days"], 1),
+                    "Ort. Korelasyon": round(s["mean_corr"], 4),
+                })
+
+            df_cmp = pd.DataFrame(rows)
+            st.markdown("#### Parametre Karşılaştırması")
+
+            def _highlight_persist(val):
+                try:
+                    v = float(val)
+                    if v > 0.98:
+                        return "color: #f472b6; font-weight: 700"
+                    if v > 0.95:
+                        return "color: #fbbf24"
+                    return "color: #34d399"
+                except Exception:
+                    return ""
+
+            st.dataframe(
+                df_cmp.style.map(_highlight_persist, subset=["alpha+beta"]),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            fig_bar = go.Figure(go.Bar(
+                x=[r["Model"] for r in rows],
+                y=[r["Ort. Korelasyon"] for r in rows],
+                marker_color=COLORS[:len(rows)],
+                text=[f"{r['Ort. Korelasyon']:.4f}" for r in rows],
+                textposition="outside",
+            ))
+            fig_bar.update_layout(
+                template=PLOT_TEMPLATE,
+                title="Modellere Gore Ortalama Çift Korelasyon",
+                xaxis_title="Model",
+                yaxis_title="Ortalama Korelasyon",
+                height=280,
+                margin=dict(l=20, r=20, t=50, b=30),
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+            fig_hl = go.Figure(go.Bar(
+                x=[r["Model"] for r in rows],
+                y=[r["Yarı-Ömür (gün)"] for r in rows],
+                marker_color=[COLORS[(i + 3) % len(COLORS)] for i in range(len(rows))],
+                text=[f"{r['Yarı-Ömür (gün)']:.1f} gün" for r in rows],
+                textposition="outside",
+            ))
+            fig_hl.update_layout(
+                template=PLOT_TEMPLATE,
+                title="Korelasyon Soku Yarı-Ömür Karşılaştırması",
+                xaxis_title="Model",
+                yaxis_title="Yarı-Ömür (gün)",
+                height=280,
+                margin=dict(l=20, r=20, t=50, b=30),
+            )
+            st.plotly_chart(fig_hl, use_container_width=True)
+
+            # DCC vs ADCC: asimetri etkisi (ortalama koşullu korelasyon ve farkı)
+            st.markdown("#### DCC vs ADCC: Asimetri Etkisi")
+            try:
+                res_d = _run_dcc_model(tuple(cmp_assets), "DCC", dh)
+                res_a = _run_dcc_model(tuple(cmp_assets), "ADCC", dh)
+                iu_c = np.triu_indices(len(cmp_assets), k=1)
+                Rd = np.asarray(res_d["R_seq"]); Ra = np.asarray(res_a["R_seq"])
+                mD = Rd[:, iu_c[0], iu_c[1]].mean(axis=1)
+                mA = Ra[:, iu_c[0], iu_c[1]].mean(axis=1)
+                cidx = res_d["index"]
+                fig_da = make_subplots(
+                    rows=2, cols=1, shared_xaxes=True, row_heights=[0.62, 0.38],
+                    vertical_spacing=0.09,
+                    subplot_titles=("Ortalama koşullu korelasyon", "Fark (ADCC - DCC)"),
+                )
+                for _fr in (1, 2):
+                    fig_da.add_vrect(x0=stress[0], x1=stress[1], fillcolor="gray",
+                                     opacity=0.15, line_width=0, row=_fr, col=1)
+                fig_da.add_trace(go.Scatter(x=cidx, y=mD, name="DCC",
+                                            line=dict(color=COLORS[7], width=1.4)), row=1, col=1)
+                fig_da.add_trace(go.Scatter(x=cidx, y=mA, name="ADCC",
+                                            line=dict(color=COLORS[2], width=1.4)), row=1, col=1)
+                fig_da.add_trace(go.Scatter(x=cidx, y=(mA - mD), name="ADCC - DCC", fill="tozeroy",
+                                            line=dict(color=COLORS[2], width=1.0),
+                                            showlegend=False), row=2, col=1)
+                fig_da.add_hline(y=0.0, line_color="gray", line_width=0.7, row=2, col=1)
+                fig_da.update_layout(
+                    template=PLOT_TEMPLATE, height=460, margin=dict(l=20, r=20, t=50, b=30),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.04, xanchor="right", x=1),
+                )
+                st.plotly_chart(fig_da, use_container_width=True)
+                st.caption("ADCC, ortak düşüşlerdeki asimetri (c>0) nedeniyle kriz ve sonrasında "
+                           "sistematik olarak daha yüksek korelasyon üretir.")
+            except Exception as exc:
+                st.info(f"DCC/ADCC karşılaştırması hesaplanamadı: `{exc}`")
+
+            st.markdown("#### Hangi Modeli Ne Zaman Kullanmalı?")
+            st.markdown(r"""
 | Model | Kullanım Durumu |
 |-------|----------------|
 | **DCC** | Hızlı prototipleme, az varlık ($N<20$), yorumlanabilirlik |
@@ -1005,233 +1073,272 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
 **Genel kural:** $\alpha + \beta$ modeller arasında büyük fark yoksa DCC yeterlidir.
 Büyük $N$ için DECO'yu tercih edin.
 """)
+        except _NoCompute:
+            pass
 
     # =========================================================================
     # TAB 5 -- MVP PORTFOLIO
     # =========================================================================
     with tab_portfolio:
-        st.markdown("### Minimum Varyans Portföy (MVP) -- DCC Tabanlı")
-        st.markdown(r"""
+        try:
+            st.markdown("### Minimum Varyans Portföy (MVP) -- DCC Tabanlı")
+            st.markdown(r"""
 $$w_t = \frac{H_t^{-1}\mathbf{1}}{\mathbf{1}^\top H_t^{-1}\mathbf{1}}$$
 """)
 
-        col_pa, col_pb = st.columns(2)
-        with col_pa:
-            mvp_assets = st.multiselect(
-                "Varlıklar (2-8)",
-                asset_cols,
-                default=asset_cols[:4],
-                key="t5_assets",
+            col_pa, col_pb = st.columns(2)
+            with col_pa:
+                mvp_assets = st.multiselect(
+                    "Varlıklar (2-8)",
+                    asset_cols,
+                    default=asset_cols[:4],
+                    key="t5_assets",
+                )
+            with col_pb:
+                mvp_model = st.selectbox(
+                    "Model Türü",
+                    ["DCC", "cDCC", "ADCC", "DECO"],
+                    key="t5_model",
+                )
+
+            if not (2 <= len(mvp_assets) <= 8):
+                st.warning("2 ile 8 arasinda varlık seçiniz.")
+                raise _NoCompute
+
+            # ── Build cache key ──
+            _key = f"d3_mvp_{'_'.join(sorted(mvp_assets))}_{mvp_model}_{dh}"
+
+            # ── Hesapla button ──
+            if st.button("🔄 Hesapla", key="d3_mvp_run", type="primary"):
+                with st.spinner(f"MVP ağırlıkları hesaplanıyor ({mvp_model})..."):
+                    try:
+                        mvp_res = _run_mvp(tuple(mvp_assets), mvp_model, dh)
+                        st.session_state[_key] = mvp_res
+                    except Exception as _exc:
+                        st.error(f"Model tahmini başarısız oldu: `{_exc}`")
+                        raise _NoCompute
+
+            # ── Gate: require result ──
+            if _key not in st.session_state:
+                st.info("⬆️ Parametreleri seçip **🔄 Hesapla**'ya tıklayın.")
+                raise _NoCompute
+
+            mvp_res = st.session_state[_key]
+
+            weights_unc = mvp_res["weights_unc"]
+            weights_lo = mvp_res["weights_lo"]
+            w_lw = mvp_res["w_lw"]
+            lw_delta = mvp_res["lw_delta"]
+            H_seq = mvp_res["H_seq"]
+            mvp_idx = mvp_res["index"]
+            mvp_cols = mvp_res["cols"]
+            mvp_ret = mvp_res["returns"]
+            T_mvp, N_mvp = weights_unc.shape
+            ann = np.sqrt(252)
+            ew = np.full(N_mvp, 1.0 / N_mvp)
+
+            col_v, col_c = st.columns(2)
+            with col_v:
+                variant = st.radio(
+                    "Ağırlık Kısıtı", ["Kısıtsız", "Long-only (Jagannathan-Ma)"],
+                    horizontal=True, key="t5_variant",
+                )
+            with col_c:
+                cost_bps = st.slider("İşlem maliyeti (bps / birim devir)", 0, 50, 10, 1, key="t5_cost")
+            cost = cost_bps / 1e4
+            is_long = variant.startswith("Long")
+            W_sel = weights_lo if is_long else weights_unc
+
+            fig_w = go.Figure()
+            fig_w.add_vrect(x0=stress[0], x1=stress[1], fillcolor="gray", opacity=0.15,
+                            line_width=0, annotation_text="stres", annotation_position="top left")
+            for i, col in enumerate(mvp_cols):
+                c = COLORS[i % len(COLORS)]
+                fig_w.add_trace(go.Scatter(
+                    x=mvp_idx, y=W_sel[:, i], mode="lines", name=col, stackgroup="one",
+                    line=dict(color=c, width=0.5), fillcolor=c,
+                ))
+            fig_w.update_layout(
+                template=PLOT_TEMPLATE, title=f"Dinamik MVP Ağırlıkları -- {mvp_model} ({variant})",
+                xaxis_title="Tarih", yaxis_title="Ağırlık", height=380,
+                margin=dict(l=20, r=20, t=50, b=30), yaxis=dict(tickformat=".0%"),
             )
-        with col_pb:
-            mvp_model = st.selectbox(
-                "Model Türü",
-                ["DCC", "cDCC", "ADCC", "DECO"],
-                key="t5_model",
+            st.plotly_chart(fig_w, use_container_width=True)
+
+            def _perf(W):
+                if W.ndim == 1:
+                    W = np.tile(W, (T_mvp, 1))
+                pv = np.sqrt(np.einsum("tn,tnm,tm->t", W, H_seq, W))
+                dW = np.abs(np.diff(W, axis=0)).sum(1)
+                gross = np.einsum("tn,tn->t", W[:-1], mvp_ret[1:])
+                net = gross - cost * dW
+                _sh = lambda x: float(np.mean(x) / np.std(x)) * ann if np.std(x) > 0 else float("nan")
+                return dict(vol=float(np.mean(pv)) * ann * 100, sharpe=_sh(gross), net=_sh(net),
+                            turn=float(np.mean(dW)) * 100, maxw=float(np.max(np.mean(W, axis=0))))
+
+            p_unc = _perf(weights_unc); p_lo = _perf(weights_lo)
+            p_lw = _perf(w_lw); p_ew = _perf(ew)
+            p_sel = p_lo if is_long else p_unc
+
+            pv_sel = np.sqrt(np.einsum("tn,tnm,tm->t", W_sel, H_seq, W_sel))
+            pv_ew = np.sqrt(np.einsum("n,tnm,m->t", ew, H_seq, ew))
+            fig_pv = go.Figure()
+            fig_pv.add_vrect(x0=stress[0], x1=stress[1], fillcolor="gray", opacity=0.15, line_width=0)
+            fig_pv.add_trace(go.Scatter(x=mvp_idx, y=pv_sel * 100, name="MVP",
+                                        line=dict(color=COLORS[4], width=1.5)))
+            fig_pv.add_trace(go.Scatter(x=mvp_idx, y=pv_ew * 100, name="Eşit Ağırlık",
+                                        line=dict(color=COLORS[1], width=1.4, dash="dash")))
+            fig_pv.update_layout(
+                template=PLOT_TEMPLATE,
+                title=f"Portföy Oynaklığı (%/gün) -- MVP vs 1/N ({mvp_model})",
+                xaxis_title="Tarih", yaxis_title="Volatilite (%)", height=280,
+                margin=dict(l=20, r=20, t=50, b=30),
+            )
+            st.plotly_chart(fig_pv, use_container_width=True)
+
+            metric_defs_mvp = [
+                ("Yıllık Vol. (%)", f"{p_sel['vol']:.2f}"),
+                ("Brüt Sharpe", f"{p_sel['sharpe']:.3f}"),
+                (f"Net Sharpe ({cost_bps}bps)", f"{p_sel['net']:.3f}"),
+                ("Günlük Devir (%)", f"{p_sel['turn']:.1f}"),
+            ]
+            m_cols = st.columns(len(metric_defs_mvp))
+            for mc, (lbl, val) in zip(m_cols, metric_defs_mvp):
+                with mc:
+                    st.markdown(_metric_card(lbl, val), unsafe_allow_html=True)
+            st.markdown("")
+
+            st.markdown(f"#### Strateji Karşılaştırması (maliyet: {cost_bps} bps)")
+
+            def _row(name, p):
+                return {
+                    "Strateji": name, "Yıllık Vol. (%)": f"{p['vol']:.1f}",
+                    "Brüt Sharpe": f"{p['sharpe']:.3f}", "Net Sharpe": f"{p['net']:.3f}",
+                    "Devir (%)": f"{p['turn']:.1f}", "Maks. Ort. Ağırlık": f"{p['maxw']:.3f}",
+                }
+            cmp_df = pd.DataFrame([
+                _row("Eşit Ağırlık (1/N)", p_ew),
+                _row(f"{mvp_model}-MVP (kısıtsız)", p_unc),
+                _row(f"{mvp_model}-MVP (long-only)", p_lo),
+                _row(f"LW-Statik (long-only, δ={lw_delta:.2f})", p_lw),
+            ])
+            st.dataframe(cmp_df, use_container_width=True, hide_index=True)
+            st.caption(
+                "Dinamik kovaryans oynaklığı düşürür; ancak kısıtsız günlük dengeleme deviri ve "
+                "maliyeti net Sharpe'ı erozyona uğratır. Long-only kısıt (Jagannathan-Ma) deviri "
+                "kırıp net rekabetçiliği geri getirir; Ledoit-Wolf büzülmesi benzer etkidedir."
             )
 
-        if not (2 <= len(mvp_assets) <= 8):
-            st.warning("2 ile 8 arasinda varlık seçiniz.")
-            st.stop()
-
-        with st.spinner(f"MVP agırlıkları hesaplanıyor ({mvp_model})..."):
-            try:
-                mvp_res = _run_mvp(tuple(mvp_assets), mvp_model, dh)
-            except Exception as exc:
-                st.error(f"Model tahmini başarısız oldu. Farklı varlık sayisi deneyin.\n\n`{exc}`")
-                st.stop()
-
-        weights_unc = mvp_res["weights_unc"]
-        weights_lo = mvp_res["weights_lo"]
-        w_lw = mvp_res["w_lw"]
-        lw_delta = mvp_res["lw_delta"]
-        H_seq = mvp_res["H_seq"]
-        mvp_idx = mvp_res["index"]
-        mvp_cols = mvp_res["cols"]
-        mvp_ret = mvp_res["returns"]
-        T_mvp, N_mvp = weights_unc.shape
-        ann = np.sqrt(252)
-        ew = np.full(N_mvp, 1.0 / N_mvp)
-
-        col_v, col_c = st.columns(2)
-        with col_v:
-            variant = st.radio(
-                "Ağırlık Kısıtı", ["Kısıtsız", "Long-only (Jagannathan-Ma)"],
-                horizontal=True, key="t5_variant",
-            )
-        with col_c:
-            cost_bps = st.slider("İşlem maliyeti (bps / birim devir)", 0, 50, 10, 1, key="t5_cost")
-        cost = cost_bps / 1e4
-        is_long = variant.startswith("Long")
-        W_sel = weights_lo if is_long else weights_unc
-
-        fig_w = go.Figure()
-        fig_w.add_vrect(x0=stress[0], x1=stress[1], fillcolor="gray", opacity=0.15,
-                        line_width=0, annotation_text="stres", annotation_position="top left")
-        for i, col in enumerate(mvp_cols):
-            c = COLORS[i % len(COLORS)]
-            fig_w.add_trace(go.Scatter(
-                x=mvp_idx, y=W_sel[:, i], mode="lines", name=col, stackgroup="one",
-                line=dict(color=c, width=0.5), fillcolor=c,
-            ))
-        fig_w.update_layout(
-            template=PLOT_TEMPLATE, title=f"Dinamik MVP Ağırlıkları -- {mvp_model} ({variant})",
-            xaxis_title="Tarih", yaxis_title="Ağırlık", height=380,
-            margin=dict(l=20, r=20, t=50, b=30), yaxis=dict(tickformat=".0%"),
-        )
-        st.plotly_chart(fig_w, use_container_width=True)
-
-        def _perf(W):
-            if W.ndim == 1:
-                W = np.tile(W, (T_mvp, 1))
-            pv = np.sqrt(np.einsum("tn,tnm,tm->t", W, H_seq, W))
-            dW = np.abs(np.diff(W, axis=0)).sum(1)
-            gross = np.einsum("tn,tn->t", W[:-1], mvp_ret[1:])
-            net = gross - cost * dW
-            _sh = lambda x: float(np.mean(x) / np.std(x)) * ann if np.std(x) > 0 else float("nan")
-            return dict(vol=float(np.mean(pv)) * ann * 100, sharpe=_sh(gross), net=_sh(net),
-                        turn=float(np.mean(dW)) * 100, maxw=float(np.max(np.mean(W, axis=0))))
-
-        p_unc = _perf(weights_unc); p_lo = _perf(weights_lo)
-        p_lw = _perf(w_lw); p_ew = _perf(ew)
-        p_sel = p_lo if is_long else p_unc
-
-        pv_sel = np.sqrt(np.einsum("tn,tnm,tm->t", W_sel, H_seq, W_sel))
-        pv_ew = np.sqrt(np.einsum("n,tnm,m->t", ew, H_seq, ew))
-        fig_pv = go.Figure()
-        fig_pv.add_vrect(x0=stress[0], x1=stress[1], fillcolor="gray", opacity=0.15, line_width=0)
-        fig_pv.add_trace(go.Scatter(x=mvp_idx, y=pv_sel * 100, name="MVP",
-                                    line=dict(color=COLORS[4], width=1.5)))
-        fig_pv.add_trace(go.Scatter(x=mvp_idx, y=pv_ew * 100, name="Eşit Ağırlık",
-                                    line=dict(color=COLORS[1], width=1.4, dash="dash")))
-        fig_pv.update_layout(
-            template=PLOT_TEMPLATE,
-            title=f"Portföy Oynaklığı (%/gün) -- MVP vs 1/N ({mvp_model})",
-            xaxis_title="Tarih", yaxis_title="Volatilite (%)", height=280,
-            margin=dict(l=20, r=20, t=50, b=30),
-        )
-        st.plotly_chart(fig_pv, use_container_width=True)
-
-        metric_defs_mvp = [
-            ("Yıllık Vol. (%)", f"{p_sel['vol']:.2f}"),
-            ("Brüt Sharpe", f"{p_sel['sharpe']:.3f}"),
-            (f"Net Sharpe ({cost_bps}bps)", f"{p_sel['net']:.3f}"),
-            ("Günlük Devir (%)", f"{p_sel['turn']:.1f}"),
-        ]
-        m_cols = st.columns(len(metric_defs_mvp))
-        for mc, (lbl, val) in zip(m_cols, metric_defs_mvp):
-            with mc:
-                st.markdown(_metric_card(lbl, val), unsafe_allow_html=True)
-        st.markdown("")
-
-        st.markdown(f"#### Strateji Karşılaştırması (maliyet: {cost_bps} bps)")
-
-        def _row(name, p):
-            return {
-                "Strateji": name, "Yıllık Vol. (%)": f"{p['vol']:.1f}",
-                "Brüt Sharpe": f"{p['sharpe']:.3f}", "Net Sharpe": f"{p['net']:.3f}",
-                "Devir (%)": f"{p['turn']:.1f}", "Maks. Ort. Ağırlık": f"{p['maxw']:.3f}",
-            }
-        cmp_df = pd.DataFrame([
-            _row("Eşit Ağırlık (1/N)", p_ew),
-            _row(f"{mvp_model}-MVP (kısıtsız)", p_unc),
-            _row(f"{mvp_model}-MVP (long-only)", p_lo),
-            _row(f"LW-Statik (long-only, δ={lw_delta:.2f})", p_lw),
-        ])
-        st.dataframe(cmp_df, use_container_width=True, hide_index=True)
-        st.caption(
-            "Dinamik kovaryans oynaklığı düşürür; ancak kısıtsız günlük dengeleme deviri ve "
-            "maliyeti net Sharpe'ı erozyona uğratır. Long-only kısıt (Jagannathan-Ma) deviri "
-            "kırıp net rekabetçiliği geri getirir; Ledoit-Wolf büzülmesi benzer etkidedir."
-        )
-
-        with st.expander("Ağırlık Özet İstatistikleri (seçili varyant)"):
-            df_w_desc = pd.DataFrame(W_sel, index=mvp_idx, columns=mvp_cols)
-            st.dataframe(
-                df_w_desc.describe().round(4).style.background_gradient(cmap="viridis"),
-                use_container_width=True,
-            )
+            with st.expander("Ağırlık Özet İstatistikleri (seçili varyant)"):
+                df_w_desc = pd.DataFrame(W_sel, index=mvp_idx, columns=mvp_cols)
+                st.dataframe(
+                    df_w_desc.describe().round(4).style.background_gradient(cmap="viridis"),
+                    use_container_width=True,
+                )
+        except _NoCompute:
+            pass
 
     # =========================================================================
     # TAB 6 -- DIAGNOSTICS & TESTS
     # =========================================================================
     with tab_diag:
-        st.markdown("### Tanılar & Testler")
-        st.markdown(
-            "Sabit-korelasyon testi, DCC yeterlilik tanısı ve yüksek-boyut için "
-            "bileşik-olabilirlik tahmini. Tümü seçili varlık kümesinde hesaplanır."
-        )
-        diag_assets = st.multiselect(
-            "Varlıklar (2-8)", asset_cols,
-            default=asset_cols[: min(5, len(asset_cols))], key="t6_assets",
-        )
-        if not (2 <= len(diag_assets) <= 8):
-            st.warning("2 ile 8 arasında varlık seçiniz.")
-        else:
-            da = tuple(diag_assets)
-
-            # 1) CCC + Engle-Sheppard sabit-korelasyon testi
-            st.markdown("#### 1. Sabit Koşullu Korelasyon (CCC) ve Engle-Sheppard Testi")
+        try:
+            st.markdown("### Tanılar & Testler")
             st.markdown(
-                r"$H_0:\ R_t=\bar R\ \forall t$. ES yapay-regresyonu "
-                r"$\hat\delta' X'X\hat\delta/\hat\sigma^2 \sim \chi^2_{s+1}$."
+                "Sabit-korelasyon testi, DCC yeterlilik tanısı ve yüksek-boyut için "
+                "bileşik-olabilirlik tahmini. Tümü seçili varlık kümesinde hesaplanır."
             )
-            with st.spinner("CCC + ES testi..."):
-                ccc = _run_ccc_test(da, dh)
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.markdown(_metric_card("CCC parametre", f"{ccc['n_params']}",
-                                         "3N + N(N-1)/2"), unsafe_allow_html=True)
-            with c2:
-                st.markdown(_metric_card("Ort. koşulsuz kor.", f"{ccc['mean_corr']:.3f}"),
-                            unsafe_allow_html=True)
-            with c3:
-                st.markdown(_metric_card("Gözlem (T x N)", f"{ccc['T']} x {ccc['N']}"),
-                            unsafe_allow_html=True)
-            es_df = pd.DataFrame([
-                {"Gecikme s": s, "chi2 (df=s+1)": f"{stat:.1f}", "p-değeri": f"{p:.2e}",
-                 "Karar": "CCC reddedilir" if p < 0.01 else "reddedilemez"}
-                for s, stat, _df, p in ccc["rows"]
-            ])
-            st.dataframe(es_df, use_container_width=True, hide_index=True)
-            st.caption("CCC reddi, koşullu korelasyonun zamanla değiştiğini ve DCC genellemesinin "
-                       "ampirik gerekçesini gösterir (Engle-Sheppard 2001; Tse 2000).")
+            diag_assets = st.multiselect(
+                "Varlıklar (2-8)", asset_cols,
+                default=asset_cols[: min(5, len(asset_cols))], key="t6_assets",
+            )
+            if not (2 <= len(diag_assets) <= 8):
+                st.warning("2 ile 8 arasında varlık seçiniz.")
+            else:
+                da = tuple(diag_assets)
 
-            # 2) DCC yeterlilik tanısı
-            st.markdown("#### 2. DCC Yeterlilik Tanısı (filtreleme sonrası)")
-            st.markdown(
-                r"Model-standardize artıklar $\varepsilon_t=R_t^{-1/2}z_t$ IID + $\mathrm{Cov}=I$ "
-                r"olmalı; aynı ES testi filtrelenmiş artıklara uygulanır ($s=5$)."
-            )
-            with st.spinner("Tanılar (CCC/DCC/ADCC)..."):
-                dg = _run_diagnostics(da, dh)
-            dg_df = pd.DataFrame([
-                {"Filtre": nm, "chi2 (df=6)": f"{dg[nm][0]:.1f}", "p-değeri": f"{dg[nm][2]:.2e}",
-                 "Kalan dinamik": "güçlü (red)" if dg[nm][2] < 0.01 else "yok (red edilemez)"}
-                for nm in ("CCC", "DCC", "ADCC")
-            ])
-            st.dataframe(dg_df, use_container_width=True, hide_index=True)
-            st.caption("Sabit korelasyon devasa kalıntı bırakırken DCC/ADCC filtrelemesi artıkları "
-                       "temizler. Not: ES doğrusal kalıntıyı yakalar; DGP asimetrik olsa da hem DCC "
-                       "hem ADCC reddedilemeyebilir (asimetri için hedefli test gerekir).")
+                # ── Build cache key ──
+                _key = f"d3_diag_{'_'.join(sorted(diag_assets))}_{dh}"
 
-            # 3) Bileşik olabilirlik
-            st.markdown("#### 3. Yüksek Boyut: İkili Bileşik Olabilirlik (Pakel vd. 2021)")
-            st.markdown(
-                r"$(a,b)$ skaler ve çiftlerde ortak $\Rightarrow$ ikili alt-olabilirlikler "
-                r"$c\ell(a,b)=\sum_{i<j}\ell_{ij}$ tutarlı; $O(N^3)$ matris tersi yok."
-            )
-            with st.spinner("İkili bileşik olabilirlik..."):
-                cl = _run_cl(da, dh)
-            cl_df = pd.DataFrame([
-                {"Yöntem": "Tam DCC (ML)", "a": f"{cl['full'][0]:.4f}", "b": f"{cl['full'][1]:.4f}",
-                 "a+b": f"{cl['full'][0] + cl['full'][1]:.4f}"},
-                {"Yöntem": f"İkili CL ({cl['P']} çift)", "a": f"{cl['cl'][0]:.4f}",
-                 "b": f"{cl['cl'][1]:.4f}", "a+b": f"{cl['cl'][0] + cl['cl'][1]:.4f}"},
-            ])
-            st.dataframe(cl_df, use_container_width=True, hide_index=True)
-            st.caption("İkili CL, DCC dinamiğini tutarlı geri kazanır (küçük verimlilik kaybıyla). "
-                       "Hesaplama avantajı asimptotiktir: yüzlerce varlıkta uygulanabilir tek yol.")
+                # ── Hesapla button ──
+                if st.button("🔄 Hesapla", key="d3_diag_run", type="primary"):
+                    with st.spinner("Tanılar hesaplanıyor..."):
+                        try:
+                            ccc = _run_ccc_test(da, dh)
+                            dg = _run_diagnostics(da, dh)
+                            cl = _run_cl(da, dh)
+                            st.session_state[_key] = {"ccc": ccc, "dg": dg, "cl": cl}
+                        except Exception as _exc:
+                            st.error(f"Tanı hesabı başarısız oldu: `{_exc}`")
+                            raise _NoCompute
+
+                # ── Gate: require result ──
+                if _key not in st.session_state:
+                    st.info("⬆️ Parametreleri seçip **🔄 Hesapla**'ya tıklayın.")
+                else:
+                    _diag_data = st.session_state[_key]
+                    ccc = _diag_data["ccc"]
+                    dg = _diag_data["dg"]
+                    cl = _diag_data["cl"]
+
+                    # 1) CCC + Engle-Sheppard sabit-korelasyon testi
+                    st.markdown("#### 1. Sabit Koşullu Korelasyon (CCC) ve Engle-Sheppard Testi")
+                    st.markdown(
+                        r"$H_0:\ R_t=\bar R\ \forall t$. ES yapay-regresyonu "
+                        r"$\hat\delta' X'X\hat\delta/\hat\sigma^2 \sim \chi^2_{s+1}$."
+                    )
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.markdown(_metric_card("CCC parametre", f"{ccc['n_params']}",
+                                                 "3N + N(N-1)/2"), unsafe_allow_html=True)
+                    with c2:
+                        st.markdown(_metric_card("Ort. koşulsuz kor.", f"{ccc['mean_corr']:.3f}"),
+                                    unsafe_allow_html=True)
+                    with c3:
+                        st.markdown(_metric_card("Gözlem (T x N)", f"{ccc['T']} x {ccc['N']}"),
+                                    unsafe_allow_html=True)
+                    es_df = pd.DataFrame([
+                        {"Gecikme s": s, "chi2 (df=s+1)": f"{stat:.1f}", "p-değeri": f"{p:.2e}",
+                         "Karar": "CCC reddedilir" if p < 0.01 else "reddedilemez"}
+                        for s, stat, _df, p in ccc["rows"]
+                    ])
+                    st.dataframe(es_df, use_container_width=True, hide_index=True)
+                    st.caption("CCC reddi, koşullu korelasyonun zamanla değiştiğini ve DCC genellemesinin "
+                               "ampirik gerekçesini gösterir (Engle-Sheppard 2001; Tse 2000).")
+
+                    # 2) DCC yeterlilik tanısı
+                    st.markdown("#### 2. DCC Yeterlilik Tanısı (filtreleme sonrası)")
+                    st.markdown(
+                        r"Model-standardize artıklar $\varepsilon_t=R_t^{-1/2}z_t$ IID + $\mathrm{Cov}=I$ "
+                        r"olmalı; aynı ES testi filtrelenmiş artıklara uygulanır ($s=5$)."
+                    )
+                    dg_df = pd.DataFrame([
+                        {"Filtre": nm, "chi2 (df=6)": f"{dg[nm][0]:.1f}", "p-değeri": f"{dg[nm][2]:.2e}",
+                         "Kalan dinamik": "güçlü (red)" if dg[nm][2] < 0.01 else "yok (red edilemez)"}
+                        for nm in ("CCC", "DCC", "ADCC")
+                    ])
+                    st.dataframe(dg_df, use_container_width=True, hide_index=True)
+                    st.caption("Sabit korelasyon devasa kalıntı bırakırken DCC/ADCC filtrelemesi artıkları "
+                               "temizler. Not: ES doğrusal kalıntıyı yakalar; DGP asimetrik olsa da hem DCC "
+                               "hem ADCC reddedilemeyebilir (asimetri için hedefli test gerekir).")
+
+                    # 3) Bileşik olabilirlik
+                    st.markdown("#### 3. Yüksek Boyut: İkili Bileşik Olabilirlik (Pakel vd. 2021)")
+                    st.markdown(
+                        r"$(a,b)$ skaler ve çiftlerde ortak $\Rightarrow$ ikili alt-olabilirlikler "
+                        r"$c\ell(a,b)=\sum_{i<j}\ell_{ij}$ tutarlı; $O(N^3)$ matris tersi yok."
+                    )
+                    cl_df = pd.DataFrame([
+                        {"Yöntem": "Tam DCC (ML)", "a": f"{cl['full'][0]:.4f}", "b": f"{cl['full'][1]:.4f}",
+                         "a+b": f"{cl['full'][0] + cl['full'][1]:.4f}"},
+                        {"Yöntem": f"İkili CL ({cl['P']} çift)", "a": f"{cl['cl'][0]:.4f}",
+                         "b": f"{cl['cl'][1]:.4f}", "a+b": f"{cl['cl'][0] + cl['cl'][1]:.4f}"},
+                    ])
+                    st.dataframe(cl_df, use_container_width=True, hide_index=True)
+                    st.caption("İkili CL, DCC dinamiğini tutarlı geri kazanır (küçük verimlilik kaybıyla). "
+                               "Hesaplama avantajı asimptotiktir: yüzlerce varlıkta uygulanabilir tek yol.")
+        except _NoCompute:
+            pass
 
 
 ##################################################################
