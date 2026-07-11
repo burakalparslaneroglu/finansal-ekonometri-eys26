@@ -342,10 +342,8 @@ def _render_impl():
     # =========================================================================
     with tab_theory:
         st.markdown("### Risk Ölçütleri & Geriye Dönük Test: Teorik Özet")
-        col1, col2, col3 = st.columns(3)
 
-        with col1:
-            st.markdown("#### Risk Ölçütleri")
+        with st.expander("📐 Risk Ölçütleri: VaR, ES & PELVE", expanded=False):
             st.markdown(r"""
 **Value at Risk (VaR):**
 $$\mathrm{VaR}_\alpha(L) = F_L^{-1}(1-\alpha)$$
@@ -372,8 +370,7 @@ Normal dağılımda $\alpha \to 0$ iken $c \to e \approx 2.718$.
 ES dört aksiyomu da sağlar; **VaR alt-toplayıcılığı sağlamaz.**
 """)
 
-        with col2:
-            st.markdown("#### Tahmin Yöntemleri")
+        with st.expander("📊 Tahmin Yöntemleri", expanded=False):
             st.markdown(r"""
 | Yöntem | Formül | Avantaj | Dezavantaj |
 |--------|--------|---------|------------|
@@ -391,8 +388,7 @@ $S$ = çarpıklık, $K$ = fazla basıklık.
 $$\mathrm{ES}_\alpha = \frac{\mathrm{VaR}_\alpha + \sigma - \xi u}{1 - \xi}$$
 """)
 
-        with col3:
-            st.markdown("#### Elicitability & Backtest")
+        with st.expander("🔬 Elicitability & Geriye Dönük Test", expanded=False):
             st.markdown(r"""
 **Fissler-Ziegel (2016):**
 ES tek başına elicitable **değil**.
@@ -424,16 +420,17 @@ Düşük FZ kaybı → daha iyi model.
         try:
             from pathlib import Path as _Path
             _nb_path = _Path(__file__).parent.parent / "notebooks" / "gun4_risk.ipynb"
-            if _nb_path.exists():
-                st.download_button(
-                    label="📥 Jupyter Not Defteri İndir (gun4_risk.ipynb)",
-                    data=_nb_path.read_bytes(),
-                    file_name="gun4_risk.ipynb",
-                    mime="application/json",
-                    use_container_width=True,
-                )
-        except Exception:
-            pass
+            st.download_button(
+                label="📥 Jupyter Not Defteri İndir (gun4_risk.ipynb)",
+                data=_nb_path.read_bytes(),
+                file_name="gun4_risk.ipynb",
+                mime="application/json",
+                use_container_width=True,
+            )
+        except FileNotFoundError:
+            st.caption("📓 `notebooks/gun4_risk.ipynb` bulunamadı.")
+        except Exception as _e:
+            st.caption(f"Notebook hatası: {_e}")
 
     # =========================================================================
     # TAB 2 — RISK PANELİ

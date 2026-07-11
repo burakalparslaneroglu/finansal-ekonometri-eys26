@@ -220,10 +220,8 @@ def render():
     # =========================================================================
     with tab_theory:
         st.markdown("### Gerçekleşen Oynaklık & Büyük Boyut Kovaryans: Teori")
-        col1, col2, col3 = st.columns(3)
 
-        with col1:
-            st.markdown("#### Gerçekleşen Varyans")
+        with st.expander("📈 Gerçekleşen Varyans (RV)", expanded=False):
             st.markdown(r"""
 **Tanim (Andersen & Bollerslev, 1998):**
 $$RV_t = \sum_{j=1}^{M} r_{t,j}^2 \;\xrightarrow{p}\; \int_0^1 \sigma_t^2(s)\,ds$$
@@ -237,13 +235,12 @@ Yavash frekans bias'ini yok eder; hızlı frekans gürültüsunu cikarir. $O(n^{
 ---
 **Realized Kernel (Barndorff-Nielsen et al., 2008, Econometrica):**
 $$RK = \sum_{h=-H}^{H} k\!\left(\tfrac{h}{H}\right)\hat{\gamma}_h, \quad k(\cdot):\text{Parzen cekirdegi}$$
-$\hat{\gamma}_h$: oto-kovaryans; cekirdek ağırlıklar gürültüyu sondurur. Uygun cekirdek + optimal $H$ ile $O(n^{-1/4})$ yakinsama -- TSRV'nin $n^{-1/6}$'sindan daha hizli (RK daha etkin).
+$\hat{\gamma}_h$: oto-kovaryans; cekirdek ağırlıklar gürültüyu sondurur. Uygun cekirdek + optimal $H$ ile $O(n^{-1/4})$ yakinsama.
 
 ---
 **Oynaklık Imza Grafigi:**
 Ornekleme frekansi yukseldikce mikroyapi gürültüsu artar ve RV pozitif yanli olur.
-**5 dakika kurali:** Bandi & Russell (2006).
-Teorik: $RV(f) = IV + 2\eta^2/f$ (gürültü-sinyal ayristirmasi).
+**5 dakika kurali:** Bandi & Russell (2006). Teorik: $RV(f) = IV + 2\eta^2/f$.
 
 ---
 **Bagimsiz Kuvvet Varyasyonu (BPV):**
@@ -258,8 +255,7 @@ $$z_t = \frac{RV_t - BPV_t}{\sqrt{(\pi^2/4+\pi-5)\,\max(1,\,\widehat{TQ}_t/BPV_t
 $z_t > z_{0.999}$ => sıçrama anlamli.
 """)
 
-        with col2:
-            st.markdown("#### HAR-RV Ailesi")
+        with st.expander("📉 HAR-RV Ailesi & Yüksek Frekans Modelleri", expanded=False):
             st.markdown(r"""
 **HAR-RV (Corsi, 2009):**
 $$RV_t^{(d)} = \beta_0 + \beta_d RV_{t-1}^{(d)} + \beta_w RV_{t-1}^{(w)} + \beta_m RV_{t-1}^{(m)} + \varepsilon_t$$
@@ -268,12 +264,12 @@ $RV^{(w)}$: 5 günlük, $RV^{(m)}$: 22 günlük ortalama. Uzun bellegi basit OLS
 ---
 **HAR-RV-J (Andersen, Bollerslev & Diebold, 2007):**
 $$RV_t = \beta_0 + \beta_d RV_{t-1} + \beta_w RV_{t-1}^{(w)} + \beta_m RV_{t-1}^{(m)} + \beta_j J_{t-1} + \varepsilon_t$$
-Gecikmeler toplam $RV$; yalnizca $J_{t-1}=\max(0,RV_{t-1}-BPV_{t-1})$ eklenir. $\beta_j$ genellikle kucuk ve cogu zaman negatif/anlamsizdir (sicramalar kalici degildir).
+$\beta_j$ genellikle kucuk ve cogu zaman negatif/anlamsizdir (sicramalar kalici degildir).
 
 ---
 **HAR-RV-CJ (Andersen, Bollerslev & Diebold, 2007, REStat):**
 $$RV_t = \beta_0 + \beta_{cd}C_{t-1} + \beta_{cw}C_{t-1}^{(w)} + \beta_{cm}C_{t-1}^{(m)} + \beta_{jd}J_{t-1} + \beta_{jw}J_{t-1}^{(w)} + \beta_{jm}J_{t-1}^{(m)} + \varepsilon_t$$
-$C_t = BPV_t$ surekli yol bileseni; gecikmeler surekli ve sicrama parcalarina ayristirilir (HAR-RV-J'yi ozel durum olarak icerir).
+$C_t = BPV_t$ surekli yol bileseni.
 
 ---
 **HEAVY (Shephard & Sheppard, 2010):**
@@ -301,8 +297,7 @@ $\tau_1 < 0$: kaldirac etkisi.
                 {"Model": "Realized GARCH", "Veri": "RV + Getiri",   "Sıçrama": "Evet",  "Tipik R2": "-"},
             ]), hide_index=True, use_container_width=True)
 
-        with col3:
-            st.markdown("#### Büyük Boyut Kovaryans")
+        with st.expander("🔢 Büyük Boyut Kovaryans: POET & Ledoit-Wolf", expanded=False):
             st.markdown(r"""
 **Marchenko-Pastur Dagilimi:**
 $$\lambda_\pm = \sigma^2\!\left(1 \pm \sqrt{\kappa}\right)^2, \quad \kappa = N/T$$
@@ -341,16 +336,17 @@ Her oz değeri ayri buzur (Stieltjes donusumu).
         try:
             from pathlib import Path as _Path
             _nb_path = _Path(__file__).parent.parent / "notebooks" / "gun5_rv.ipynb"
-            if _nb_path.exists():
-                st.download_button(
-                    label="📥 Jupyter Not Defteri İndir (gun5_rv.ipynb)",
-                    data=_nb_path.read_bytes(),
-                    file_name="gun5_rv.ipynb",
-                    mime="application/json",
-                    use_container_width=True,
-                )
-        except Exception:
-            pass
+            st.download_button(
+                label="📥 Jupyter Not Defteri İndir (gun5_rv.ipynb)",
+                data=_nb_path.read_bytes(),
+                file_name="gun5_rv.ipynb",
+                mime="application/json",
+                use_container_width=True,
+            )
+        except FileNotFoundError:
+            st.caption("📓 `notebooks/gun5_rv.ipynb` bulunamadı.")
+        except Exception as _e:
+            st.caption(f"Notebook hatası: {_e}")
 
     # =========================================================================
     # TAB 2: Volatilite Imza Grafigi
@@ -666,7 +662,7 @@ Her oz değeri ayri buzur (Stieltjes donusumu).
                 selected_models = st.multiselect(
                     "Modeller",
                     ["GARCH(1,1) baseline", "HEAVY", "GARCH-X", "Realized GARCH"],
-                    default=["GARCH(1,1) baseline", "HEAVY", "GARCH-X"],
+                    default=[],
                     key="hf_models",
                 )
 

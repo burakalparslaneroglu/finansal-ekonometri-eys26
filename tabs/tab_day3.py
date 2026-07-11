@@ -584,16 +584,17 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
         try:
             from pathlib import Path as _Path
             _nb_path = _Path(__file__).parent.parent / "notebooks" / "gun3_dcc.ipynb"
-            if _nb_path.exists():
-                st.download_button(
-                    label="📥 Jupyter Not Defteri İndir (gun3_dcc.ipynb)",
-                    data=_nb_path.read_bytes(),
-                    file_name="gun3_dcc.ipynb",
-                    mime="application/json",
-                    use_container_width=True,
-                )
-        except Exception:
-            pass
+            st.download_button(
+                label="📥 Jupyter Not Defteri İndir (gun3_dcc.ipynb)",
+                data=_nb_path.read_bytes(),
+                file_name="gun3_dcc.ipynb",
+                mime="application/json",
+                use_container_width=True,
+            )
+        except FileNotFoundError:
+            st.caption("📓 `notebooks/gun3_dcc.ipynb` bulunamadı.")
+        except Exception as _e:
+            st.caption(f"Notebook hatası: {_e}")
 
     # =========================================================================
     # TAB 2 -- MODEL ESTIMATION
@@ -607,7 +608,7 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
                 selected_assets = st.multiselect(
                     "Varlıklar",
                     asset_cols,
-                    default=asset_cols[:3],
+                    default=[],
                     key="t2_assets",
                 )
             with col_b:
@@ -761,7 +762,7 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
             )
             st.plotly_chart(fig_vol, use_container_width=True)
 
-            with st.expander("Tahmin Detayları"):
+            with st.expander("Tahmin Detayları", expanded=False):
                 st.json({
                     "model_type": model_type,
                     "alpha": round(alpha_v, 6),
@@ -794,7 +795,7 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
                 deco_assets = st.multiselect(
                     "Varlıklar (DECO)",
                     asset_cols,
-                    default=asset_cols,
+                    default=[],
                     key="t3_assets",
                 )
             with col_db:
@@ -932,7 +933,7 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
             cmp_assets = st.multiselect(
                 "Karşılaştırma İçin Varlıklar (önerilen: 3)",
                 asset_cols,
-                default=asset_cols[:3],
+                default=[],
                 key="t4_assets",
             )
 
@@ -1091,7 +1092,7 @@ $$w_t = \frac{H_t^{-1}\mathbf{1}}{\mathbf{1}^\top H_t^{-1}\mathbf{1}}$$
                 mvp_assets = st.multiselect(
                     "Varlıklar (2-8)",
                     asset_cols,
-                    default=asset_cols[:4],
+                    default=[],
                     key="t5_assets",
                 )
             with col_pb:
@@ -1229,7 +1230,7 @@ $$w_t = \frac{H_t^{-1}\mathbf{1}}{\mathbf{1}^\top H_t^{-1}\mathbf{1}}$$
                 "kırıp net rekabetçiliği geri getirir; Ledoit-Wolf büzülmesi benzer etkidedir."
             )
 
-            with st.expander("Ağırlık Özet İstatistikleri (seçili varyant)"):
+            with st.expander("Ağırlık Özet İstatistikleri (seçili varyant)", expanded=False):
                 df_w_desc = pd.DataFrame(W_sel, index=mvp_idx, columns=mvp_cols)
                 st.dataframe(
                     df_w_desc.describe().round(4).style.background_gradient(cmap="viridis"),
@@ -1250,7 +1251,7 @@ $$w_t = \frac{H_t^{-1}\mathbf{1}}{\mathbf{1}^\top H_t^{-1}\mathbf{1}}$$
             )
             diag_assets = st.multiselect(
                 "Varlıklar (2-8)", asset_cols,
-                default=asset_cols[: min(5, len(asset_cols))], key="t6_assets",
+                default=[], key="t6_assets",
             )
             if not (2 <= len(diag_assets) <= 8):
                 st.warning("2 ile 8 arasında varlık seçiniz.")

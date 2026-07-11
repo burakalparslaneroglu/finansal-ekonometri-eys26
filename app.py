@@ -128,6 +128,10 @@ with st.sidebar:
     if not st.session_state.get("data_loaded"):
         if st.button("📂 Örnek Veriyi Yükle", use_container_width=True):
             with st.spinner("Veri yükleniyor…"):
+                # Clear any stale computation caches from previous sessions
+                for _ck in [k for k in list(st.session_state.keys())
+                            if str(k).startswith(("d3_", "d4_", "d5_"))]:
+                    del st.session_state[_ck]
                 st.session_state.returns_df = load_default_data()
                 st.session_state["crisis_window"] = load_crisis_window()
                 st.session_state["data_loaded"] = True
