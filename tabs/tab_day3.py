@@ -1059,6 +1059,27 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
                 st.plotly_chart(fig_da, use_container_width=True)
                 st.caption("ADCC, ortak düşüşlerdeki asimetri (c>0) nedeniyle kriz ve sonrasında "
                            "sistematik olarak daha yüksek korelasyon üretir.")
+
+                # ── ADCC vs DCC: sınır-karışım LR testi ──────────────────────
+                from dcc_garch import adcc_vs_dcc_lr_test
+                ll_d = res_d["stats"].get("corr_loglik")
+                ll_a = res_a["stats"].get("corr_loglik")
+                if ll_d is not None and ll_a is not None:
+                    lrt = adcc_vs_dcc_lr_test(ll_a, ll_d, alpha=0.05)
+                    st.markdown("**Sınır-Karışım LR Testi (ADCC vs DCC)**")
+                    lc1, lc2, lc3 = st.columns(3)
+                    lc1.metric("LR = 2(ℓ_ADCC − ℓ_DCC)", f"{lrt['lr_stat']:.2f}")
+                    lc2.metric("Kritik değer (%5)", f"{lrt['critical_value']:.2f}")
+                    lc3.metric("p-değeri", f"{lrt['p_value']:.2e}")
+                    _vd = ("H₀: c=0 **reddedildi** → ADCC anlamlı biçimde üstün"
+                           if lrt["reject"] else
+                           "H₀: c=0 reddedilemedi → ADCC anlamlı üstünlük göstermiyor")
+                    st.caption(
+                        "H₀: c=0. Asimetri parametresi c≥0 parametre uzayının sınırında "
+                        "olduğundan null dağılım ½χ²₀+½χ²₁'dir (düz χ²₁ değil; kritik değer "
+                        "2.71, 3.84 değil; p yarıya iner — Self-Liang 1987 / Andrews 2001). "
+                        + _vd + ". Sonlu örneklemde DCC-null parametrik bootstrap tercih edilir."
+                    )
             except Exception as exc:
                 st.info(f"DCC/ADCC karşılaştırması hesaplanamadı: `{exc}`")
 

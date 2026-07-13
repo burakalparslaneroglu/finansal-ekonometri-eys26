@@ -191,6 +191,7 @@ class DCCGarch:
         self.sigmas = None
         self.dcc_params = None       # estimated [a, b] or [a, b, c]
         self.dcc_base_params = None  # for DECO: underlying DCC (a, b)
+        self.corr_loglik = None      # maximised correlation-stage log-likelihood
         self.Q_seq = None
         self.R_seq = None
         self.H_seq = None
@@ -341,6 +342,11 @@ class DCCGarch:
             )
         if not res.success:
             raise ValueError(f"DCC estimation failed: {res.message}")
+
+        # _dcc_loglike returns the NEGATIVE correlation-stage log-likelihood,
+        # so the maximised log-likelihood is -res.fun. Needed for the
+        # ADCC-vs-DCC boundary-mixture LR test (see adcc_vs_dcc_lr_test).
+        self.corr_loglik = float(-res.fun)
 
         if is_deco:
             self.dcc_base_params = res.x
@@ -619,7 +625,74 @@ class DCCGarch:
             "model_type": self.model_type,
             "n_assets": N,
             "n_obs": T,
+            "corr_loglik": getattr(self, "corr_loglik", None),
         }
+
+
+# ---------------------------------------------------------------------------
+# ADCC vs DCC likelihood-ratio test (boundary mixture)
+# ---------------------------------------------------------------------------
+
+def adcc_vs_dcc_lr_test(loglik_adcc, loglik_dcc, alpha=0.05):
+    """
+    Likelihood-ratio test of ADCC against DCC at the correlation stage.
+
+    ADCC nests DCC under H0: c = 0 (no asymmetry). Because the asymmetry
+    parameter satisfies c >= 0, the null value lies on the BOUNDARY of the
+    parameter space, so the standard Wilks chi^2_1 result does NOT apply.
+    Under the regularity conditions of Self & Liang (1987) / Andrews (2001)
+    the asymptotic null distribution of
+
+        LR = 2 * ( loglik_adcc - loglik_dcc )
+
+    is the 50:50 mixture  0.5 * chi^2_0 + 0.5 * chi^2_1.
+
+    Consequences versus the naive chi^2_1 test:
+      * critical value at level ``alpha`` is ``chi2.isf(2*alpha, 1)``
+        (e.g. 2.706 at alpha=0.05, NOT 3.841);
+      * the p-value is HALF the naive one:  p = 0.5 * P(chi^2_1 > LR).
+
+    In finite samples, with the ADCC positivity constraints, a parametric
+    bootstrap from the fitted DCC (H0) model is the most reliable alternative.
+
+    Parameters
+    ----------
+    loglik_adcc, loglik_dcc : float
+        Maximised correlation-stage log-likelihoods of the ADCC and DCC fits
+        on the SAME data with the SAME marginals (see ``DCCGarch.corr_loglik``).
+    alpha : float, optional
+        Test level (default 0.05).
+
+    Returns
+    -------
+    dict with keys:
+        lr_stat, p_value, critical_value, alpha, reject, distribution, note
+    """
+    from scipy.stats import chi2
+
+    lr = 2.0 * (float(loglik_adcc) - float(loglik_dcc))
+    # LR >= 0 in theory (nested MLE); clamp tiny negatives from the optimiser.
+    lr_clamped = max(lr, 0.0)
+
+    # Mixture p-value: P(0.5*chi2_0 + 0.5*chi2_1 >= x) = 0.5 * P(chi2_1 >= x)
+    # for x > 0, and = 1 at x = 0 (point mass of chi2_0).
+    p_value = 0.5 * float(chi2.sf(lr_clamped, df=1)) if lr_clamped > 0.0 else 1.0
+
+    # Critical value c: P(mixture > c) = alpha  =>  0.5 * P(chi2_1 > c) = alpha.
+    critical_value = float(chi2.isf(2.0 * alpha, df=1)) if 0.0 < alpha < 0.5 else 0.0
+
+    return {
+        "lr_stat": float(lr),
+        "p_value": float(p_value),
+        "critical_value": critical_value,
+        "alpha": float(alpha),
+        "reject": bool(lr_clamped > critical_value),
+        "distribution": "0.5*chi2_0 + 0.5*chi2_1 (boundary mixture)",
+        "note": ("Boundary test (c>=0): Self-Liang 1987 / Andrews 2001. "
+                 "Naive chi2_1 (crit 3.841) is too conservative; here crit=2.706 "
+                 "and p is halved. Finite-sample: prefer a parametric bootstrap "
+                 "from the DCC null."),
+    }
 
 
 # ---------------------------------------------------------------------------

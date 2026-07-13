@@ -14,11 +14,11 @@ def calculate_pelve_single(losses, alpha=0.05):
     """
     losses = np.sort(losses)
     n = len(losses)
-    
+
     # 1. Target Value: VaR_{1-alpha}(L)
     # Using interpolation to match standard quantile definitions
     var_target = np.quantile(losses, 1.0 - alpha)
-    
+
     # 2. Define the objective function to find root for c
     # We want to solve: ES_{1 - c*alpha}(L) - VaR_{1 - alpha}(L) = 0
     # Note: ES_p(L) = Mean of losses exceeding quantile(p)
@@ -33,12 +33,12 @@ def calculate_pelve_single(losses, alpha=0.05):
     # Check boundary conditions
     obj_1 = objective(1.0) # ES_{1-alpha} vs VaR_{1-alpha} (usually positive, since ES > VaR)
     obj_max = objective(1.0 / alpha) # ES_{0} (mean of all losses) vs VaR_{1-alpha} (usually negative, since mean of all returns is smaller than 95% quantile)
-    
+
     if obj_1 <= 0:
         return 1.0
     if obj_max >= 0:
         return 1.0 / alpha
-        
+
     try:
         c_star = bisect(objective, 1.0, 1.0 / alpha, xtol=1e-5)
         return c_star
@@ -55,7 +55,7 @@ def calculate_pelve(returns_df, alpha=0.05, rolling_window=None):
     If rolling_window is specified, returns a rolling PELVE time-series.
     """
     losses_df = -returns_df
-    
+
     if rolling_window is None:
         pelve_results = {}
         for col in losses_df.columns:
@@ -78,7 +78,7 @@ def calculate_var_es(returns, alpha=0.05, method="parametric_normal", df_t=5):
     Returns: (VaR, ES) as positive numbers representing loss.
     """
     losses = -np.asarray(returns)
-    
+
     if method == "parametric_normal":
         mu = np.mean(losses)
         sigma = np.std(losses, ddof=1)
@@ -86,7 +86,7 @@ def calculate_var_es(returns, alpha=0.05, method="parametric_normal", df_t=5):
         # ES for Normal distribution: mu + sigma * (phi(z_alpha) / alpha)
         z = norm.ppf(1.0 - alpha)
         es_val = mu + sigma * (norm.pdf(z) / alpha)
-        
+
     elif method == "parametric_student_t":
         mu = np.mean(losses)
         sigma = np.std(losses, ddof=1)
@@ -96,14 +96,14 @@ def calculate_var_es(returns, alpha=0.05, method="parametric_normal", df_t=5):
         # ES for Student-t
         x_q = t.ppf(1.0 - alpha, df_t)
         es_val = mu + scale * (t.pdf(x_q, df_t) / alpha) * ((df_t + x_q**2) / (df_t - 1))
-        
+
     elif method == "historical":
         var_val = np.quantile(losses, 1.0 - alpha)
         es_val = np.mean(losses[losses >= var_val])
-        
+
     else:
         raise ValueError(f"Unknown method: {method}")
-        
+
     return var_val, es_val
 
 def backtest_var(returns, var_forecasts, alpha=0.05):
@@ -114,25 +114,25 @@ def backtest_var(returns, var_forecasts, alpha=0.05):
     """
     losses = -np.asarray(returns)
     var_forecasts = np.asarray(var_forecasts)
-    
+
     # Hits (violations): 1 if loss > VaR, 0 otherwise
     hits = (losses > var_forecasts).astype(int)
     N = len(hits)
     x = np.sum(hits)
-    
+
     # 1. Kupiec POF Test (Unconditional Coverage)
     p_hat = x / N
     # Likelihood ratio statistic
     # LR = -2 * ln( ( (1 - alpha)^(N-x) * alpha^x ) / ( (1 - p_hat)^(N-x) * p_hat^x ) )
     # To handle 0 hits or 100% hits, we use clip
     p_hat_clip = np.clip(p_hat, 1e-8, 1.0 - 1e-8)
-    lr_pof = -2.0 * ( (N - x) * np.log(1.0 - alpha) + x * np.log(alpha) 
+    lr_pof = -2.0 * ( (N - x) * np.log(1.0 - alpha) + x * np.log(alpha)
                       - (N - x) * np.log(1.0 - p_hat_clip) - x * np.log(p_hat_clip) )
     p_val_pof = 1.0 - norm.cdf(np.sqrt(max(0, lr_pof))) # Chi-sq with 1 df is same as Z^2
     # Standard chi-square with 1 df p-value:
     from scipy.stats import chi2
     p_val_pof = 1.0 - chi2.cdf(lr_pof, df=1)
-    
+
     # 2. Christoffersen Independence Test
     # Counts transitions between state 0 (no violation) and 1 (violation)
     n00, n01, n10, n11 = 0, 0, 0, 0
@@ -145,23 +145,23 @@ def backtest_var(returns, var_forecasts, alpha=0.05):
             n10 += 1
         elif hits[i-1] == 1 and hits[i] == 1:
             n11 += 1
-            
+
     p01 = n01 / (n00 + n01) if (n00 + n01) > 0 else 0
     p11 = n11 / (n10 + n11) if (n10 + n11) > 0 else 0
     p2 = (n01 + n11) / (n00 + n01 + n10 + n11) if (n00 + n01 + n10 + n11) > 0 else 0
-    
+
     # Likelihood under independence
     L_ind = ((1.0 - p2)**(n00 + n10)) * (p2**(n01 + n11))
     # Likelihood under dependence
     L_dep = ((1.0 - p01)**n00) * (p01**n01) * ((1.0 - p11)**n10) * (p11**n11)
-    
+
     lr_ind = -2.0 * np.log(max(1e-10, L_ind / max(1e-10, L_dep)))
     p_val_ind = 1.0 - chi2.cdf(lr_ind, df=1)
-    
+
     # Conditional Coverage (Kupiec + Christoffersen)
     lr_cc = lr_pof + lr_ind
     p_val_cc = 1.0 - chi2.cdf(lr_cc, df=2)
-    
+
     return {
         "violations": x,
         "violation_rate": p_hat,
@@ -179,7 +179,7 @@ def backtest_es_acerbi_szekely(returns, var_forecasts, es_forecasts, alpha=0.05)
           Z1 = (1/N_T) * sum_t ( L_t I_t / ES_t ) - 1
       Z2: frequency+magnitude test, normalized by N*alpha (expected # violations)
           Z2 = (1/(N*alpha)) * sum_t ( L_t I_t / ES_t ) - 1
-    Under H0, E[Z1]=E[Z2]=0; strongly negative => risk underestimation.
+    Under H0, E[Z1]=E[Z2]=0; strongly POSITIVE => risk underestimation (positive-loss/positive-ES convention: too-small ES inflates L_t/ES_t).
     (The previous implementation labeled Z2 as 'Z1'.)
     """
     losses = -np.asarray(returns)
@@ -201,8 +201,8 @@ def backtest_es_acerbi_szekely(returns, var_forecasts, es_forecasts, alpha=0.05)
         snt = sh.sum(); sn = float(np.sum(sl * sh / se))
         sim_z1[b] = sn / snt - 1.0 if snt > 0 else np.nan
         sim_z2[b] = sn / (N * alpha) - 1.0
-    p1 = float(np.nanmean(sim_z1 <= z1_stat))
-    p2 = float(np.nanmean(sim_z2 <= z2_stat))
+    p1 = float(np.nanmean(sim_z1 >= z1_stat))  # right tail: positive Z = underestimation
+    p2 = float(np.nanmean(sim_z2 >= z2_stat))  # right tail
 
     return {
         "z1_stat": z1_stat, "z1_pvalue": p1,     # TRUE Z1 (violation-count norm.)
@@ -533,22 +533,22 @@ if __name__ == "__main__":
     # Compute static PELVE
     pelve_val = calculate_pelve_single(-returns.values)  # input is losses
     print(f"Static PELVE for {_first_col}:", pelve_val)
-    
+
     # Compute GARCH-based VaR/ES and backtest
     from arch import arch_model
     model = arch_model(returns * 100, vol='Garch', p=1, q=1)
     res = model.fit(disp='off')
-    
+
     cond_vol = res.conditional_volatility / 100
     # Parametric forecasts
     var_forecast = cond_vol * norm.ppf(0.95)
     es_forecast = cond_vol * (norm.pdf(norm.ppf(0.95)) / 0.05)
-    
+
     # Backtest
     bt_var = backtest_var(returns.values, var_forecast.values, alpha=0.05)
     bt_es = backtest_es_acerbi_szekely(returns.values, var_forecast.values, es_forecast.values, alpha=0.05)
     fz_loss = fissler_ziegel_loss(returns.values, var_forecast.values, es_forecast.values, alpha=0.05)
-    
+
     print("VaR Backtest:", bt_var)
     print("ES Backtest:", bt_es)
     print("Joint FZ Loss:", fz_loss)
