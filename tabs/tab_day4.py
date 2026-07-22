@@ -596,10 +596,12 @@ ES için tek başına *elicitability* olmadığından, kombinasyonun teorik daya
 ---
 **FZ0 Ortak Kaybı** (dış pozitif sözleşme; burada kayıp $\ell_t = -y_t$):
 
-$$S(v,e;\ell_t) = \bigl(\mathbf{1}_{\ell_t>v}-\alpha\bigr)(-v)
- - \mathbf{1}_{\ell_t>v}\ell_t
- + \tfrac{-1}{e}\!\left(e + \tfrac{\ell_t - v}{\alpha}\mathbf{1}_{\ell_t>v}\right)
- + \log e - 1$$
+$$\begin{aligned}
+S(v,e;\ell_t) = &\;\bigl(\mathbf{1}_{\ell_t>v}-\alpha\bigr)(-v)\\
+&- \mathbf{1}_{\ell_t>v}\ell_t\\
+&+ \tfrac{-1}{e}\!\left(e + \tfrac{\ell_t - v}{\alpha}\mathbf{1}_{\ell_t>v}\right)\\
+&+ \log e - 1
+\end{aligned}$$
 
 Düşük $\bar{S}$ → daha iyi (VaR, ES) çifti.
 
@@ -642,11 +644,27 @@ Pozitif → referanstan daha iyi; negatif → daha kötü.
 | 5–9 | 🟡 Sarı | 3.20–4.00 |
 | ≥10 | 🔴 Kırmızı | 4.00 |
 """)
-            st.info(
-                "**Kupiec (1995) POF:** İhlal oranı testi.  \n"
-                "**Christoffersen (1998):** İhlal bağımsızlığı.  \n"
-                "**Acerbi-Szekely (2014) Z₁/Z₂:** ES testi.  \n"
-                "**Berkowitz (2001) PIT:** Tam dağılım testi.")
+            st.markdown(r"""
+**Kupiec (1995) POF — Koşulsuz Kapsam Testi:**
+$H_0$: İhlal oranı $\hat{p}=x/T$ beklenen $\alpha$'ya eşittir.
+$LR_{\text{uc}} = -2\ln\!\left[\frac{(1-\alpha)^{T-x}\alpha^x}{(1-\hat{p})^{T-x}\hat{p}^x}\right] \xrightarrow{d} \chi^2(1)$.
+Yalnızca ihlal *sıklığını* sınar; kümelemeye duyarsızdır.
+
+**Christoffersen (1998) — Bağımsızlık Testi:**
+$H_0$: İhlal göstergesi $I_t=\mathbf{1}[L_t>\widehat{\text{VaR}}_\alpha]$ birinci derecede Markov bağımsız dağılır (kümeleme yok).
+$LR_{\text{ind}} \sim \chi^2(1)$.
+Kupiec'i geçip Christoffersen'i reddeden model → ihlaller peş peşe kümeleniyor.
+
+**Acerbi-Szekely (2014) — ES Testleri:**
+$Z_1 = \frac{1}{N_T}\sum_t \frac{L_t I_t}{\widehat{\text{ES}}_t} - 1$: ihlal *sayısına* ($N_T$) koşullu; yalnızca kayıp büyüklüğünü sınar.
+$Z_2 = \frac{1}{T\alpha}\sum_t \frac{L_t I_t}{\widehat{\text{ES}}_t} - 1$: $T\alpha$ ile normalize; sıklık ve büyüklüğü birlikte sınar.
+$H_0$ altında $E[Z_1]=E[Z_2]=0$. Anlamlı pozitif değer → ES eksik tahmin edilmiş.
+
+**Berkowitz (2001) — PIT Testi:**
+Model $F_t$ doğruysa $u_t=F_t(L_t)\sim U[0,1]$ i.i.d. Dönüştürülmüş değişken $x_t=\Phi^{-1}(u_t)$, $H_0$ altında $N(0,1)$ i.i.d. olmalı.
+AR(1) alternatife karşı LR testi; kalibrasyon ve bağımlılığı birlikte sınar.
+Kupiec/Christoffersen'den farklı: tüm dağılımı sınar, kuyruk-özgü hatalar maskelenebilir.
+""")
 
         st.divider()
         try:
