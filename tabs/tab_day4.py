@@ -38,6 +38,9 @@ _COMBO_COLORS = {
     "Min-skor":    "#34d399",
     "Göreli-skor": "#f87171",
     "Basit ort.":  "#a78bfa",
+    "Medyan":      "#fbbf24",
+    "Minimum":     "#60a5fa",
+    "Maksimum":    "#f472b6",
 }
 
 _BASELINE_METHODS = ["Normal", "Student-t", "Hist.Sim.", "Cornish-Fisher"]
@@ -276,7 +279,7 @@ def compute_combination_tab(asset, alpha, n_oos, selected_models_tuple, df_key):
 
     valid = [m for m in selected_models_tuple
              if m in var_fcs_all
-             and np.isfinite(var_fcs_all[m]).sum() >= max(10, 0.5 * n_actual)]
+             and np.isfinite(var_fcs_all[m]).sum() >= 0.8 * n_actual]
 
     _base = {"ok": False, "valid": valid, "oos_idx": oos_idx,
              "oos_returns": oos_returns, "all_fz": fz_all,
@@ -297,6 +300,9 @@ def compute_combination_tab(asset, alpha, n_oos, selected_models_tuple, df_key):
     vc, ec, wQ, wS     = min_score_combine(y, Vm, Em, alpha)
     vr, er, w_rel, lam = relative_score_combine(y, Vm, Em, alpha)
     vs_ = Vm.mean(1); es_ = Em.mean(1)
+    vmed = np.median(Vm, 1); emed = np.median(Em, 1)   # medyan (aykiri-dayanikli)
+    vmin = Vm.min(1);        emin = Em.min(1)           # minimum (en agresif)
+    vmax = Vm.max(1);        emax = Em.max(1)           # maksimum (en tutucu)
 
     indiv_fz = {m: fissler_ziegel_loss(y, var_fcs_all[m][mask], es_fcs_all[m][mask], alpha)
                 for m in valid}
@@ -304,6 +310,9 @@ def compute_combination_tab(asset, alpha, n_oos, selected_models_tuple, df_key):
         "Min-skor":    fissler_ziegel_loss(y, vc, ec, alpha),
         "Göreli-skor": fissler_ziegel_loss(y, vr, er, alpha),
         "Basit ort.":  fissler_ziegel_loss(y, vs_, es_, alpha),
+        "Medyan":      fissler_ziegel_loss(y, vmed, emed, alpha),
+        "Minimum":     fissler_ziegel_loss(y, vmin, emin, alpha),
+        "Maksimum":    fissler_ziegel_loss(y, vmax, emax, alpha),
     }
 
     return {
@@ -314,8 +323,10 @@ def compute_combination_tab(asset, alpha, n_oos, selected_models_tuple, df_key):
         "es_fcs":        {m: es_fcs_all[m]  for m in valid},
         "var_fcs_valid": {m: var_fcs_all[m][mask] for m in valid},
         "es_fcs_valid":  {m: es_fcs_all[m][mask]  for m in valid},
-        "combo_var": {"Min-skor": vc, "Göreli-skor": vr, "Basit ort.": vs_},
-        "combo_es":  {"Min-skor": ec, "Göreli-skor": er, "Basit ort.": es_},
+        "combo_var": {"Min-skor": vc, "Göreli-skor": vr, "Basit ort.": vs_,
+                      "Medyan": vmed, "Minimum": vmin, "Maksimum": vmax},
+        "combo_es":  {"Min-skor": ec, "Göreli-skor": er, "Basit ort.": es_,
+                      "Medyan": emed, "Minimum": emin, "Maksimum": emax},
         "indiv_fz": indiv_fz, "combo_fz": combo_fz,
         "weights": {
             "wQ":    np.asarray(wQ), "wS":    np.asarray(wS),
