@@ -522,6 +522,157 @@ def basel_traffic_light(n_violations, n_obs, confidence=0.99):
     }
 
 
+# ============================================================================
+# New backtesting tests: DQ, McNeil-Frey, Nolde-Ziegel
+# ============================================================================
+
+def dq_test(returns, var_forecasts, alpha=0.05, p=4):
+    """
+    Dynamic Quantile (DQ) test — Engle & Manganelli (2004).
+
+    Hit_t = 1{L_t > VaR_t} - alpha  (centred, E=0 under H0).
+    Regressor matrix X (n x q), n = T-p, q = p+2:
+        columns: [1, Hit_{t-1}, ..., Hit_{t-p}, VaR_t]
+    Test statistic: DQ = (Hit' X (X'X)^{-1} X' Hit) / (alpha*(1-alpha))
+    DQ ~ chi2(q) under H0.  p < 0.05 → reject.
+
+    Inputs: returns (1D, actual returns), var_forecasts (1D, positive loss convention).
+    Returns: {"stat", "pvalue", "reject", "note"}.
+    """
+    from scipy.stats import chi2 as _chi2
+
+    L = -np.asarray(returns, dtype=float)
+    v = np.asarray(var_forecasts, dtype=float)
+    T = len(L)
+
+    Hit = (L > v).astype(float) - alpha   # centred indicator
+
+    n = T - p
+    q = p + 2                             # constant + p lags + VaR
+    if n <= q + 1:
+        return {"stat": np.nan, "pvalue": np.nan, "reject": False,
+                "note": "Yetersiz gözlem"}
+
+    # Build X (n × q): constant | lag-j Hit | VaR_t
+    X = np.ones((n, q))
+    for j in range(1, p + 1):
+        X[:, j] = Hit[(p - j):(T - j)]   # Hit_{t-j}, t = p,...,T-1
+    X[:, p + 1] = v[p:]                  # VaR_t,       t = p,...,T-1
+
+    Hit_dep = Hit[p:]                     # Hit_t,        t = p,...,T-1
+
+    try:
+        XtX = X.T @ X
+        note = ""
+        if np.linalg.cond(XtX) > 1e12:
+            XtX_inv = np.linalg.pinv(XtX)
+            note = "Pseudo-ters (tekil X'X)"
+        else:
+            XtX_inv = np.linalg.inv(XtX)
+
+        XtH    = X.T @ Hit_dep           # shape (q,)
+        dq_stat = float(XtH @ XtX_inv @ XtH / (alpha * (1.0 - alpha)))
+        pvalue  = float(1.0 - _chi2.cdf(dq_stat, df=q))
+        return {"stat": dq_stat, "pvalue": pvalue, "reject": pvalue < 0.05, "note": note}
+    except np.linalg.LinAlgError:
+        return {"stat": np.nan, "pvalue": np.nan, "reject": False,
+                "note": "Matris terslenemedi"}
+
+
+def mcneil_frey_test(returns, var_forecasts, es_forecasts, alpha=0.05, n_boot=1000):
+    """
+    McNeil & Frey (2000) exceedance-residuals test for ES.
+
+    Violation days: er_t = L_t - ES_t  (should be ≈ 0 under H0).
+    H0: E[er] = 0.  H1: E[er] > 0  (ES underestimated, one-sided).
+    p-value via centred bootstrap.
+
+    Inputs: returns, var_forecasts, es_forecasts (all positive loss convention).
+    Returns: {"stat" (t-stat), "pvalue", "reject", "note"}.
+    """
+    L = -np.asarray(returns, dtype=float)
+    v = np.asarray(var_forecasts, dtype=float)
+    e = np.clip(np.asarray(es_forecasts, dtype=float), 1e-8, None)
+
+    hits   = L > v
+    n_hits = int(hits.sum())
+
+    if n_hits < 5:
+        return {"stat": np.nan, "pvalue": np.nan, "reject": False,
+                "note": f"Yetersiz ihlal (n={n_hits})"}
+
+    er     = L[hits] - e[hits]          # exceedance residuals
+    er_std = float(np.std(er, ddof=1))
+
+    if er_std < 1e-12:
+        return {"stat": np.nan, "pvalue": np.nan, "reject": False,
+                "note": "Sıfır varyans"}
+
+    t_obs = float(np.mean(er)) / (er_std / np.sqrt(n_hits))
+
+    # Centred bootstrap (H0 world: zero mean)
+    er0 = er - np.mean(er)
+    rng = np.random.default_rng(42)
+    t_boot = np.empty(n_boot)
+    for b in range(n_boot):
+        samp  = rng.choice(er0, size=n_hits, replace=True)
+        s_std = float(np.std(samp, ddof=1))
+        t_boot[b] = (float(np.mean(samp)) / (s_std / np.sqrt(n_hits))
+                     if s_std > 0 else 0.0)
+
+    pvalue = float(np.mean(t_boot >= t_obs))
+    return {"stat": t_obs, "pvalue": pvalue, "reject": pvalue < 0.05,
+            "note": f"n_ihlal={n_hits}"}
+
+
+def nz_conditional_calibration(returns, var_forecasts, es_forecasts, alpha=0.05):
+    """
+    Nolde-Ziegel (2017) unconditional calibration test for (VaR, ES).
+
+    Identification functions (loss convention, v=VaR>0, e=ES>0, L=-r):
+        V1_t = 1{L_t > v_t} - alpha
+        V2_t = (1/alpha)*1{L_t > v_t}*(L_t - v_t)  -  (e_t - v_t)
+
+    SIGN NOTE: The task-prompt formula gave V2 = +(e-v) + (1/α)·hit·(L-v),
+    which yields E[V2] = 2(ES-VaR) ≠ 0 under H0 and would always reject.
+    The correct sign per NZ (2017) is -(e-v), implemented here.
+
+    Wald statistic: T_stat = T · Vbar' · Omega^{-1} · Vbar ~ chi2(2) under H0.
+
+    Returns: {"stat", "pvalue", "reject", "note"}.
+    """
+    from scipy.stats import chi2 as _chi2
+
+    L = -np.asarray(returns, dtype=float)
+    v = np.asarray(var_forecasts, dtype=float)
+    e = np.asarray(es_forecasts, dtype=float)
+    T = len(L)
+
+    hit = (L > v).astype(float)
+    V1  = hit - alpha
+    V2  = (1.0 / alpha) * hit * (L - v) - (e - v)
+
+    V    = np.column_stack([V1, V2])   # (T, 2)
+    Vbar = V.mean(axis=0)              # (2,)
+    Vc   = V - Vbar
+    Omega = (Vc.T @ Vc) / T
+
+    try:
+        note = ""
+        if np.linalg.cond(Omega) > 1e12:
+            Omega_inv = np.linalg.pinv(Omega)
+            note = "Pseudo-ters (tekil Ω)"
+        else:
+            Omega_inv = np.linalg.inv(Omega)
+
+        T_stat = float(T * Vbar @ Omega_inv @ Vbar)
+        pvalue = float(1.0 - _chi2.cdf(T_stat, df=2))
+        return {"stat": T_stat, "pvalue": pvalue, "reject": pvalue < 0.05, "note": note}
+    except np.linalg.LinAlgError:
+        return {"stat": np.nan, "pvalue": np.nan, "reject": False,
+                "note": "Matris terslenemedi"}
+
+
 # Quick self-test
 if __name__ == "__main__":
     from pathlib import Path

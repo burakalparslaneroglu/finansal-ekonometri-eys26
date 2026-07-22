@@ -370,16 +370,21 @@ def compute_backtest(asset, alpha, method, window, n_obs, df_key):
 
 
 def _run_backtest_tests(ret_oos, var_oos, es_oos, alpha):
-    """Run backtest tests on pre-computed arrays. Returns (bt, es_bt, berk, traffic, viol_250, n_250)."""
+    """Run backtest tests. Returns (bt, es_bt, berk, traffic, viol_250, n_250, dq, mf, nz)."""
     from risk_metrics import (backtest_var, backtest_es_acerbi_szekely,
-                               berkowitz_pit_test, basel_traffic_light)
+                               berkowitz_pit_test, basel_traffic_light,
+                               dq_test, mcneil_frey_test,
+                               nz_conditional_calibration)
     n_250    = min(len(ret_oos), 250)
     bt       = backtest_var(ret_oos, var_oos, alpha)
     es_bt    = backtest_es_acerbi_szekely(ret_oos, var_oos, es_oos, alpha)
     berk     = berkowitz_pit_test(ret_oos, var_oos)
     viol_250 = int(np.sum(-ret_oos[-n_250:] > var_oos[-n_250:]))
     traffic  = basel_traffic_light(viol_250, n_250, 1 - alpha)
-    return bt, es_bt, berk, traffic, viol_250, n_250
+    dq       = dq_test(ret_oos, var_oos, alpha)
+    mf       = mcneil_frey_test(ret_oos, var_oos, es_oos, alpha)
+    nz       = nz_conditional_calibration(ret_oos, var_oos, es_oos, alpha)
+    return bt, es_bt, berk, traffic, viol_250, n_250, dq, mf, nz
 
 
 # ─── SHARED BACKTEST DISPLAY ─────────────────────────────────────────────────
@@ -387,7 +392,7 @@ def _run_backtest_tests(ret_oos, var_oos, es_oos, alpha):
 def _display_backtest_results(ret_oos, var_oos, es_oos, idx_oos, alpha,
                                model_label, df, all_cols):
     """Render violation plot + Basel light + test table + stat cards."""
-    bt, es_bt, berk, traffic, viol_250, n_250 = _run_backtest_tests(
+    bt, es_bt, berk, traffic, viol_250, n_250, dq, mf, nz = _run_backtest_tests(
         ret_oos, var_oos, es_oos, alpha)
 
     hits      = (-ret_oos > var_oos)
@@ -462,6 +467,15 @@ def _display_backtest_results(ret_oos, var_oos, es_oos, idx_oos, alpha,
         {"Test": "Berkowitz PIT (Ljung-Box)",
          "İstatistik": _fs(berk["pit_acf1"]),    "p-değeri": _fs(berk["lb_pvalue_level"]),
          "Sonuç": _pr(berk["lb_pvalue_level"])},
+        {"Test": "DQ — Dinamik Kantil, p=4 (VaR)" + (f" [{dq['note']}]" if dq.get("note") else ""),
+         "İstatistik": _fs(dq["stat"]),           "p-değeri": _fs(dq["pvalue"]),
+         "Sonuç": _pr(dq["pvalue"])},
+        {"Test": "McNeil-Frey Aşım Artığı (ES)" + (f" [{mf['note']}]" if mf.get("note") else ""),
+         "İstatistik": _fs(mf["stat"]),           "p-değeri": _fs(mf["pvalue"]),
+         "Sonuç": _pr(mf["pvalue"])},
+        {"Test": "Nolde-Ziegel Koşulsuz Kalibrasyon (VaR,ES)" + (f" [{nz['note']}]" if nz.get("note") else ""),
+         "İstatistik": _fs(nz["stat"]),           "p-değeri": _fs(nz["pvalue"]),
+         "Sonuç": _pr(nz["pvalue"])},
     ])
     st.dataframe(
         tbl.style
