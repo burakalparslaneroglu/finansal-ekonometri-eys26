@@ -595,38 +595,44 @@ ES için tek başına *elicitability* olmadığından, kombinasyonun teorik daya
 
 ---
 **FZ0 Ortak Kaybı** (dış pozitif sözleşme; burada kayıp $\ell_t = -y_t$):
-
-$$\begin{aligned}
+""")
+            st.latex(r"""
+\begin{aligned}
 S(v,e;\ell_t) = &\;\bigl(\mathbf{1}_{\ell_t>v}-\alpha\bigr)(-v)\\
 &- \mathbf{1}_{\ell_t>v}\ell_t\\
 &+ \tfrac{-1}{e}\!\left(e + \tfrac{\ell_t - v}{\alpha}\mathbf{1}_{\ell_t>v}\right)\\
 &+ \log e - 1
-\end{aligned}$$
-
+\end{aligned}
+""")
+            st.markdown(r"""
 Düşük $\bar{S}$ → daha iyi (VaR, ES) çifti.
 
 ---
 **Min-skor kombinasyonu** (Taylor 2020):
-
-$$\min_{w^Q,\,w^S \geq 0,\;\mathbf{1}^\top w = 1}
-  \sum_t S\!\left(\sum_j w^Q_j v_{jt},\; \sum_j w^S_j e_{jt};\; \ell_t\right)$$
-
+""")
+            st.latex(r"""
+\min_{w^Q,\,w^S \geq 0,\;\mathbf{1}^\top w = 1}
+  \sum_t S\!\left(\sum_j w^Q_j v_{jt},\; \sum_j w^S_j e_{jt};\; \ell_t\right)
+""")
+            st.markdown(r"""
 $w^Q$ VaR kantilini, $w^S$ ES'yi ayrı ağırlıklar ile birleştirir (spacing trick ile dışbükey).
 
 ---
 **Göreli-skor kombinasyonu** (softmax):
-
-$$w_j^{\mathrm{rel}} = \frac{\exp(-\lambda \bar{S}_j)}{\sum_k \exp(-\lambda \bar{S}_k)}$$
-
+""")
+            st.latex(r"""
+w_j^{\mathrm{rel}} = \frac{\exp(-\lambda \bar{S}_j)}{\sum_k \exp(-\lambda \bar{S}_k)}
+""")
+            st.markdown(r"""
 Daha düşük bireysel FZ kaybına daha yüksek ağırlık. $\lambda$ arama ile seçilir.
 
 ---
 **Beceri Skoru** (referans modele göre):
-
-$$\mathrm{Skill}(M,\,\mathrm{ref}) = \left(\frac{\bar{S}_M}{\bar{S}_{\mathrm{ref}}} - 1\right)\times 100\%$$
-
-Pozitif → referanstan daha iyi; negatif → daha kötü.
 """)
+            st.latex(r"""
+\mathrm{Skill}(M,\,\mathrm{ref}) = \left(\frac{\bar{S}_M}{\bar{S}_{\mathrm{ref}}} - 1\right)\times 100\%
+""")
+            st.markdown("Pozitif → referanstan daha iyi; negatif → daha kötü.")
             st.info(
                 "**Taylor (2020) bulgusu:** Tek bir seriye bakıldığında en iyi bireysel model "
                 "kombinasyonu geçebilir. Ancak çok-varlık ortalamasında kombinasyon avantajı "
