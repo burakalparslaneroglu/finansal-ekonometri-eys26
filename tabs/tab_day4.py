@@ -218,6 +218,24 @@ def compute_fz_comparison(asset, alpha, n_oos, df_key):
         pass
     var_fcs["GARCH-Normal"] = garch_var
     es_fcs["GARCH-Normal"]  = garch_es
+    # --- Yari-parametrik tahminciler (FZ-GAS, FZ-GARCH, CaViaR-AsL) ---
+    try:
+        from sp_estimators import compute_sp_estimators
+        sp_res = compute_sp_estimators(returns, alpha, n_oos)
+        for _nm, (_v, _e) in sp_res.items():
+            var_fcs[_nm] = _v
+            es_fcs[_nm]  = _e
+    except Exception:
+        pass
+    # --- GARCH evreni (GJR/EGARCH + parametrik & FHS varyantlari) ---
+    try:
+        from sp_estimators import compute_garch_universe
+        gu_res = compute_garch_universe(returns, alpha, n_oos)
+        for _nm, (_v, _e) in gu_res.items():
+            var_fcs[_nm] = _v
+            es_fcs[_nm]  = _e
+    except Exception:
+        pass
     fz_losses = {}; var_means = {}; es_means = {}
     for m in var_fcs:
         v_arr = var_fcs[m]; e_arr = es_fcs[m]
@@ -230,7 +248,9 @@ def compute_fz_comparison(asset, alpha, n_oos, df_key):
             es_means[m]  = float(np.mean(e_arr[mask]))
     # --- Taylor (2020) combining of the valid methods (reference = Hist.Sim.) ---
     ref = "Hist.Sim."
-    comb_methods = [m for m in ["Normal", "Student-t", "Cornish-Fisher", "GARCH-Normal"]
+    comb_methods = [m for m in ["Normal", "Student-t", "Cornish-Fisher", "GARCH-Normal",
+                                "GARCH-FHS", "GJR-FHS",
+                                "FZ-GAS", "FZ-GARCH-t", "CaViaR-AsL(dyn)"]
                     if m in var_fcs and np.isfinite(var_fcs[m]).sum() >= 0.8 * n_oos]
     cm_mask = np.ones(n_oos, dtype=bool)
     for m in comb_methods + [ref]:
