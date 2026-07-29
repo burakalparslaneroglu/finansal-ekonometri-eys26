@@ -22,6 +22,11 @@ import math
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
+
+# NumPy 2.0 removed np.trapz → np.trapezoid; patch before importing arch
+if not hasattr(np, "trapz"):
+    np.trapz = np.trapezoid  # type: ignore[attr-defined]
+
 from arch import arch_model
 
 # ---------------------------------------------------------------------------
