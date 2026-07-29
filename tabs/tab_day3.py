@@ -190,12 +190,24 @@ def _run_comparison(asset_tuple: tuple, df_hash: str) -> dict:
     cols = list(asset_tuple)
     returns = df[cols]
     results = {}
+    N = len(cols)
+    idx_u = np.triu_indices(N, k=1)
 
     for mtype in ("DCC", "cDCC", "DECO"):
-        dcc = DCCGarch(model_type=mtype)
-        std_resid = dcc.fit_univariate_garch(returns)
-        dcc.fit_dcc(std_resid)
-        results[mtype] = dcc.get_summary_stats()
+        m = DCCGarch(model_type=mtype)
+        std_resid = m.fit_univariate_garch(returns)
+        m.fit_dcc(std_resid)
+        stats = m.get_summary_stats()
+        # Çiftler-arası std: her çiftin zaman-ortalaması korelasyonunun standart sapması.
+        # DCC: her çift kendi dinamiğine sahip → std > 0.
+        # DECO: tüm çiftler aynı rho_t'ye kısıtlanmış → std = 0 (tanımlı).
+        pair_means = np.array([m.R_seq[:, i, j].mean() for i, j in zip(*idx_u)])
+        stats["corr_cross_std"] = float(pair_means.std())
+        results[mtype] = {
+            "stats": stats,
+            "R_seq": m.R_seq.copy(),   # (T, N, N)
+            "index": returns.index,
+        }
 
     return results
 
@@ -974,7 +986,8 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
             cmp_results = st.session_state[_key]
 
             rows = []
-            for mtype, s in cmp_results.items():
+            for mtype, entry in cmp_results.items():
+                s = entry["stats"]
                 rows.append({
                     "Model": mtype,
                     "alpha": round(s["alpha"], 4),
@@ -982,6 +995,7 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
                     "alpha+beta": round(s["persistence"], 4),
                     "Yarı-Ömür (gün)": round(s["half_life_days"], 1),
                     "Ort. Korelasyon": round(s["mean_corr"], 4),
+                    "Çiftler Arası Std": round(s.get("corr_cross_std", 0.0), 4),
                 })
 
             df_cmp = pd.DataFrame(rows)
@@ -1094,6 +1108,48 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
                     )
             except Exception as exc:
                 st.info(f"DCC/ADCC karşılaştırması hesaplanamadı: `{exc}`")
+
+            # ── DCC vs DECO: ekikorelasyon etkisi ────────────────────────────
+            st.markdown("#### DCC vs DECO: Ekikorelasyon Etkisi")
+            try:
+                R_dcc  = np.asarray(cmp_results["DCC"]["R_seq"])
+                R_deco = np.asarray(cmp_results["DECO"]["R_seq"])
+                cidx_d = cmp_results["DCC"]["index"]
+                iu = np.triu_indices(len(cmp_assets), k=1)
+                # DECO rho_t: tüm çiftler aynı → ilk çifti al
+                rho_deco = R_deco[:, iu[0][0], iu[1][0]]
+                fig_dd = go.Figure()
+                # DCC ikili korelasyonları (ince renkli çizgiler)
+                for k, (i, j) in enumerate(zip(*iu)):
+                    lbl = f"DCC {cmp_assets[i]}-{cmp_assets[j]}"
+                    fig_dd.add_trace(go.Scatter(
+                        x=cidx_d, y=R_dcc[:, i, j],
+                        mode="lines", name=lbl,
+                        line=dict(width=1.0, color=COLORS[k % len(COLORS)]),
+                        opacity=0.65,
+                    ))
+                # DECO rho_t (kalın beyaz)
+                fig_dd.add_trace(go.Scatter(
+                    x=cidx_d, y=rho_deco,
+                    mode="lines", name="DECO ρ_t (tüm çiftler)",
+                    line=dict(color="#ffffff", width=2.5),
+                ))
+                fig_dd.update_layout(
+                    template=PLOT_TEMPLATE,
+                    title="DCC İkili Korelasyonlar vs DECO ρ_t",
+                    xaxis_title="Tarih", yaxis_title="Korelasyon",
+                    height=380, margin=dict(l=20, r=20, t=50, b=30),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                xanchor="right", x=1),
+                )
+                st.plotly_chart(fig_dd, use_container_width=True)
+                st.caption(
+                    "DECO tüm ikili korelasyonları tek bir ρ_t'ye (kesitsel ortalama) "
+                    "kısıtlar. Çiftler Arası Std sütunu bu kısıtın maliyetini özetler: "
+                    "DCC'de > 0, DECO'da tanım gereği 0."
+                )
+            except Exception as exc:
+                st.info(f"DCC/DECO karşılaştırması hesaplanamadı: `{exc}`")
 
             st.markdown("#### Hangi Modeli Ne Zaman Kullanmalı?")
             st.markdown(r"""
