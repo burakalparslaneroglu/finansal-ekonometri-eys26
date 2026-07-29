@@ -203,7 +203,7 @@ class DCCGarch:
     # Step 1 – Univariate GARCH
     # ------------------------------------------------------------------
 
-    def fit_univariate_garch(self, returns):
+    def fit_univariate_garch(self, returns, train_end=None):
         """
         Fit a GARCH(1,1) model to each column of *returns*.
 
@@ -211,6 +211,11 @@ class DCCGarch:
         ----------
         returns : pd.DataFrame, shape (T, N)
             Asset returns (decimals, e.g. 0.01 for 1 %).
+        train_end : int or None
+            If given, estimate GARCH parameters on returns[:train_end] only,
+            then fix them and filter the full series.  This prevents look-ahead
+            bias in OOS evaluations (ZD-2 fix).  Default None trains on the
+            full sample (legacy behaviour).
 
         Returns
         -------
@@ -224,11 +229,25 @@ class DCCGarch:
 
         for i in range(n_assets):
             col_name = returns.columns[i]
-            model = arch_model(
-                returns[col_name] * 100,
-                vol='Garch', p=1, q=1, dist='normal', rescale=False
-            )
-            res = model.fit(disp='off')
+            r_pct = returns[col_name].values * 100
+
+            if train_end is not None:
+                # ZD-2 fix: estimate on r[:train_end], fix params, filter all T
+                model_is = arch_model(
+                    r_pct[:train_end],
+                    vol='Garch', p=1, q=1, dist='normal', rescale=False
+                )
+                res_is = model_is.fit(disp='off')
+                model_full = arch_model(
+                    r_pct, vol='Garch', p=1, q=1, dist='normal', rescale=False
+                )
+                res = model_full.fix(res_is.params)
+            else:
+                model = arch_model(
+                    r_pct, vol='Garch', p=1, q=1, dist='normal', rescale=False
+                )
+                res = model.fit(disp='off')
+
             self.univariate_models.append(res)
             self.sigmas[:, i] = res.conditional_volatility / 100
             self.std_resid[:, i] = returns[col_name].values / self.sigmas[:, i]
@@ -275,7 +294,7 @@ class DCCGarch:
     # Step 2 – DCC parameter estimation
     # ------------------------------------------------------------------
 
-    def fit_dcc(self, std_resid):
+    def fit_dcc(self, std_resid, train_end=None):
         """
         Estimate the DCC/cDCC/ADCC/DECO correlation parameters.
 
@@ -287,22 +306,28 @@ class DCCGarch:
         ----------
         std_resid : np.ndarray, shape (T, N)
             Standardised residuals (from ``fit_univariate_garch``).
+        train_end : int or None
+            If given, estimate DCC parameters on std_resid[:train_end] only
+            (ZD-2 fix — prevents look-ahead bias in OOS evaluations).
+            bar_Q and N_bar are also computed from the in-sample slice.
 
         Returns
         -------
         params : np.ndarray
             Estimated [a, b] or [a, b, c] vector.
         """
-        self._bar_Q = np.cov(std_resid.T)
+        # Use in-sample slice for parameter estimation when train_end is set
+        z_est = std_resid[:train_end] if train_end is not None else std_resid
+        self._bar_Q = np.cov(z_est.T)
 
-        # Unconditional N_bar for ADCC
-        T, N = std_resid.shape
-        neg_shocks = std_resid * (std_resid < 0)
+        # Unconditional N_bar for ADCC (in-sample only)
+        T_est, N = z_est.shape
+        neg_shocks = z_est * (z_est < 0)
         N_bar = np.zeros((N, N))
-        for t in range(T):
+        for t in range(T_est):
             n = neg_shocks[t]
             N_bar += np.outer(n, n)
-        N_bar /= T
+        N_bar /= T_est
         self._N_bar = N_bar
 
         is_adcc = (self.model_type == "ADCC")
@@ -324,21 +349,20 @@ class DCCGarch:
         res = minimize(
             self._dcc_loglike,
             x0,
-            args=(std_resid,),
+            args=(z_est,),
             bounds=bounds,
             constraints=constraints,
-            method="L-BFGS-B",
+            method="SLSQP",
         )
 
         if not res.success:
-            # Retry with SLSQP which handles constraints more robustly
+            # Retry with Nelder-Mead (no gradient, more robust for flat regions)
             res = minimize(
                 self._dcc_loglike,
                 x0,
-                args=(std_resid,),
-                bounds=bounds,
-                constraints=constraints,
-                method="SLSQP",
+                args=(z_est,),
+                method="Nelder-Mead",
+                options={"xatol": 1e-7, "fatol": 1e-7, "maxiter": 10000},
             )
         if not res.success:
             raise ValueError(f"DCC estimation failed: {res.message}")

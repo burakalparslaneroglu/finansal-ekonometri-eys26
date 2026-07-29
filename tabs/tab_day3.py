@@ -128,7 +128,8 @@ def _run_deco_model(asset_tuple: tuple, df_hash: str) -> dict:
 
     Returns
     -------
-    dict with keys: stats, rho_series, index, sample_mean_corr, dcc_rho_series
+    dict with keys: stats, rho_series, index, sample_mean_corr,
+                  dcc_pair_min, dcc_pair_max, n_pairs
     """
     from dcc_garch import DCCGarch
 
@@ -147,20 +148,23 @@ def _run_deco_model(asset_tuple: tuple, df_hash: str) -> dict:
     idx_upper = np.triu_indices(n, k=1)
     sample_mean_corr = float(np.mean(corr_mat[idx_upper]))
 
+    # DCC modeli kendi std_resid'ini kullanır (DECO'nunkiyle karışmamalı)
     dcc = DCCGarch(model_type="DCC")
-    dcc.fit_univariate_garch(returns)
-    dcc.fit_dcc(std_resid)
-    dcc_pairs = np.triu_indices(n, k=1)
-    dcc_mean_corr = np.array([
-        np.mean(dcc.R_seq[t][dcc_pairs]) for t in range(dcc.R_seq.shape[0])
-    ])
+    dcc_std_resid = dcc.fit_univariate_garch(returns)
+    dcc.fit_dcc(dcc_std_resid)
+    dcc_pairs_idx = np.triu_indices(n, k=1)
+    T_dcc = dcc.R_seq.shape[0]
+    # Tüm ikili korelasyon serileri: şekil (T, M), M = N*(N-1)/2
+    dcc_pair_corr = np.array([dcc.R_seq[t][dcc_pairs_idx] for t in range(T_dcc)])
 
     return {
         "stats": stats,
         "rho_series": rho_series,
         "index": returns.index,
         "sample_mean_corr": sample_mean_corr,
-        "dcc_rho_series": dcc_mean_corr,
+        "dcc_pair_min": dcc_pair_corr.min(axis=1),   # (T,) en düşük ikili kor.
+        "dcc_pair_max": dcc_pair_corr.max(axis=1),   # (T,) en yüksek ikili kor.
+        "n_pairs": dcc_pair_corr.shape[1],            # N*(N-1)/2
     }
 
 
@@ -800,7 +804,7 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
                 )
             with col_db:
                 show_dcc_compare = st.checkbox(
-                    "DCC ortalama korelasyonuyla karşılaştır",
+                    "DCC çiftsel korelasyon bandıyla karşılaştır",
                     value=True,
                     key="t3_compare",
                 )
@@ -832,7 +836,9 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
             rho = deco_res["rho_series"]
             deco_idx = deco_res["index"]
             sample_mean = deco_res["sample_mean_corr"]
-            dcc_mean_corr = deco_res["dcc_rho_series"]
+            dcc_pair_min = deco_res["dcc_pair_min"]
+            dcc_pair_max = deco_res["dcc_pair_max"]
+            n_pairs      = deco_res["n_pairs"]
             deco_stats = deco_res["stats"]
 
             roll_win = 60
@@ -871,25 +877,31 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
             st.plotly_chart(fig_rho, use_container_width=True)
 
             if show_dcc_compare:
+                _idx_list = list(deco_idx)
                 fig_cmp = go.Figure()
+                # Gölgeli bant: DCC ikili korelasyonlarının kesitsel [min, max] aralığı
+                fig_cmp.add_trace(go.Scatter(
+                    x=_idx_list + _idx_list[::-1],
+                    y=list(dcc_pair_max) + list(dcc_pair_min[::-1]),
+                    fill="toself",
+                    fillcolor="rgba(86,180,233,0.18)",
+                    line=dict(color="rgba(0,0,0,0)"),
+                    name=f"DCC ikili kor. aralığı ({n_pairs} çift, min–maks)",
+                    hoverinfo="skip",
+                ))
+                # DECO rho_t = DCC ikili korelasyonlarının kesitsel ortalaması
                 fig_cmp.add_trace(go.Scatter(
                     x=deco_idx, y=rho,
                     mode="lines",
-                    name="DECO rho_t",
-                    line=dict(color=COLORS[0], width=1.4),
-                ))
-                fig_cmp.add_trace(go.Scatter(
-                    x=deco_idx, y=dcc_mean_corr,
-                    mode="lines",
-                    name="DCC ortalama rho_t",
-                    line=dict(color=COLORS[2], width=1.4, dash="dash"),
+                    name="DECO ρ_t  (= DCC çiftleri kesitsel ort.)",
+                    line=dict(color=COLORS[0], width=2.2),
                 ))
                 fig_cmp.update_layout(
                     template=PLOT_TEMPLATE,
-                    title="DECO vs DCC Ortalama Korelasyon Karşılaştırması",
+                    title=f"DECO ρ_t vs DCC Çiftsel Korelasyon Bandı ({n_pairs} çift)",
                     xaxis_title="Tarih",
-                    yaxis_title="Ortalama Korelasyon",
-                    height=280,
+                    yaxis_title="Korelasyon",
+                    height=320,
                     margin=dict(l=20, r=20, t=50, b=30),
                 )
                 st.plotly_chart(fig_cmp, use_container_width=True)

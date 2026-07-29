@@ -154,12 +154,20 @@ def onatski_ed(R, k_max=10, max_iter=100):
 def frob_rel(Sig_hat, Sigma):
     return np.linalg.norm(Sig_hat - Sigma, "fro") / np.linalg.norm(Sigma, "fro")
 
-def mvp_oos_var(Sig_hat, Sigma):
-    """True variance of the MVP built from Sig_hat (regularize if singular)."""
+def mvp_oos_var(Sig_hat, Sigma, T_train: int | None = None):
+    """True variance of the MVP built from Sig_hat.
+
+    If T_train is given and N >= T_train (sample covariance is singular by
+    construction), return np.nan immediately rather than applying the 1e-12
+    ridge, which is numerically unstable for a rank-deficient matrix.
+    LW and POET estimators are always regularised and may still be called.
+    """
     N = Sig_hat.shape[0]
+    if T_train is not None and N >= T_train:
+        return np.nan
     ones = np.ones(N)
     try:
-        inv = np.linalg.solve(Sig_hat + 1e-12*np.eye(N), ones)
+        inv = np.linalg.solve(Sig_hat, ones)        # no epsilon: caller ensures PD
     except np.linalg.LinAlgError:
         inv = np.linalg.pinv(Sig_hat) @ ones
     w = inv / (ones @ inv)
@@ -175,20 +183,26 @@ def mvp_oracle_var(Sigma):
 def run_regime(N, T, K, rng, label):
     R, Sigma, B, Sig_f, Sig_u = simulate_panel(N, T, K, rng)
     # split for OOS MVP: estimate on first half, score true var
-    Rtr = R[:T//2]
+    T_train = T // 2
+    Rtr = R[:T_train]
     est = {}
     est["Sample"]    = cov_sample(Rtr)
     est["LW-linear"] = cov_lw_linear(Rtr)
     poet, Cused      = cov_poet(Rtr, K)
     est["POET(K)"]   = poet
 
-    print(f"\n===== {label}: N={N}, T={T} (train {T//2}), K_true={K}, c=N/T_train={N/(T//2):.2f} =====")
+    print(f"\n===== {label}: N={N}, T={T} (train {T_train}), K_true={K}, c=N/T_train={N/T_train:.2f} =====")
     orc = mvp_oracle_var(Sigma)
     print(f"{'Estimator':<12}{'Frob.rel':>10}{'MVP true var':>15}{'MVP/oracle':>12}")
     for name, Sh in est.items():
         fr = frob_rel(Sh, Sigma)
-        mv = mvp_oos_var(Sh, Sigma)
-        print(f"{name:<12}{fr:>10.3f}{mv:>15.3e}{mv/orc:>12.2f}")
+        # Sample covariance is rank-T_train when N >= T_train: MVP undefined
+        t_arg = T_train if name == "Sample" else None
+        mv = mvp_oos_var(Sh, Sigma, T_train=t_arg)
+        if np.isnan(mv):
+            print(f"{name:<12}{fr:>10.3f}{'---':>15}{'tanımsız':>12}   (N≥T_eğitim, tekil)")
+        else:
+            print(f"{name:<12}{fr:>10.3f}{mv:>15.3e}{mv/orc:>12.2f}")
     print(f"{'Oracle(Sigma)':<12}{0.0:>10.3f}{orc:>15.3e}{1.0:>12.2f}   (POET C={Cused})")
 
     # factor recovery (on full sample)
