@@ -126,26 +126,20 @@ with st.sidebar:
     st.markdown("**Veri**")
 
     if not st.session_state.get("data_loaded"):
-        if st.button("📂 Örnek Veriyi Yükle", use_container_width=True):
-            with st.spinner("Veri yükleniyor…"):
-                # Clear any stale computation caches from previous sessions
-                for _ck in [k for k in list(st.session_state.keys())
-                            if str(k).startswith(("d3_", "d4_", "d5_"))]:
-                    del st.session_state[_ck]
-                st.session_state.returns_df = load_default_data()
-                st.session_state["crisis_window"] = load_crisis_window()
-                st.session_state["data_loaded"] = True
-            st.rerun()
+        from tabs.data_panel import SOURCES
+        data_source = st.radio("Veri Kaynağı", SOURCES, key="data_source_sel")
     else:
+        data_source = st.session_state.get("data_source", "Örnek veri")
         df_info = st.session_state.returns_df
         asset_cols_info = [
             c for c in df_info.columns
             if not c.endswith("_RV") and not c.endswith("_BPV")
         ]
         st.success("✅ Veri yüklendi")
+        st.caption(f"Kaynak: {data_source}")
         st.caption(f"Varlık sayısı: {len(asset_cols_info)}")
         st.caption(f"Gözlem: {len(df_info)}")
-        if not df_info.empty:
+        if not df_info.empty and isinstance(df_info.index, pd.DatetimeIndex):
             st.caption(
                 f"Tarih: {df_info.index[0].strftime('%Y-%m-%d')} — "
                 f"{df_info.index[-1].strftime('%Y-%m-%d')}"
@@ -164,7 +158,8 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 day_label_map = {
     "3. Gün — Çok Değişkenli Oynaklık (DCC)":
-        ("3. Gün · 29 Temmuz", "DCC-GARCH, cDCC, ADCC, GO-GARCH, DECO & MVP Portföy"),
+        ("3. Gün · 29 Temmuz",
+         "DCC-GARCH, cDCC, ADCC, DECO, GO-GARCH, Faktör-DCC & MVP Portföy"),
     "4. Gün — Risk Ölçütleri & Backtest":
         ("4. Gün · 30 Temmuz", "VaR, ES, PELVE, Öngörü Kombinasyonu & Geriye Dönük Test"),
     "5. Gün — Gerçekleşen Oynaklık & Büyük Boyut":
@@ -185,9 +180,12 @@ st.markdown(f"""
 # ---------------------------------------------------------------------------
 if not st.session_state.get("data_loaded"):
     st.info(
-        "**Başlamak için** sol menüden **📂 Örnek Veriyi Yükle** düğmesine tıklayın.",
+        "**Başlamak için** sol menüden bir **veri kaynağı** seçin, ardından "
+        "aşağıdaki adımları tamamlayın.",
         icon="👈",
     )
+    from tabs import data_panel
+    data_panel.render(data_source, load_default_data, load_crisis_window)
 else:
     if day == "3. Gün — Çok Değişkenli Oynaklık (DCC)":
         from tabs import tab_day3

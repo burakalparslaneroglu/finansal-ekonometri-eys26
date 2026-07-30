@@ -38,14 +38,8 @@ class _NoCompute(Exception):
 # Helper utilities
 # ---------------------------------------------------------------------------
 
-def _asset_cols(df: pd.DataFrame):
-    """Return only return columns (exclude _RV and _BPV suffixes)."""
-    return [c for c in df.columns if not c.endswith("_RV") and not c.endswith("_BPV")]
-
-
-def _df_hash() -> str:
-    """Return a short, stable string key derived from the active DataFrame."""
-    return str(hash(st.session_state.returns_df.to_csv()))[:8]
+from ._utils import asset_cols as _asset_cols   # shared with Day 5
+from ._utils import df_key as _df_hash          # sha1 content hash, not hash()
 
 
 def _metric_card(label: str, value: str, tip: str = "") -> str:
@@ -139,7 +133,10 @@ def _run_deco_model(asset_tuple: tuple, df_hash: str) -> dict:
 
     deco = DCCGarch(model_type="DECO")
     std_resid = deco.fit_univariate_garch(returns)
-    deco.fit_dcc(std_resid)
+    # deco_base_dcc: run a reference DCC fit purely so the two parameter sets
+    # can be shown side by side.  It is OFF in the default estimation path, so
+    # a plain DECO fit stays cheaper than a DCC fit.
+    deco.fit_dcc(std_resid, deco_base_dcc=True)
     stats = deco.get_summary_stats()
     rho_series = deco.get_equicorrelation_series()
 
@@ -152,19 +149,22 @@ def _run_deco_model(asset_tuple: tuple, df_hash: str) -> dict:
     dcc = DCCGarch(model_type="DCC")
     dcc_std_resid = dcc.fit_univariate_garch(returns)
     dcc.fit_dcc(dcc_std_resid)
-    dcc_pairs_idx = np.triu_indices(n, k=1)
     T_dcc = dcc.R_seq.shape[0]
     # Tüm ikili korelasyon serileri: şekil (T, M), M = N*(N-1)/2
-    dcc_pair_corr = np.array([dcc.R_seq[t][dcc_pairs_idx] for t in range(T_dcc)])
+    dcc_pair_corr = np.asarray(dcc.R_seq)[:, idx_upper[0], idx_upper[1]]
 
     return {
         "stats": stats,
+        "dcc_stats": dcc.get_summary_stats(),
         "rho_series": rho_series,
         "index": returns.index,
+        "cols": cols,
         "sample_mean_corr": sample_mean_corr,
         "dcc_pair_min": dcc_pair_corr.min(axis=1),   # (T,) en düşük ikili kor.
         "dcc_pair_max": dcc_pair_corr.max(axis=1),   # (T,) en yüksek ikili kor.
         "n_pairs": dcc_pair_corr.shape[1],            # N*(N-1)/2
+        "R_deco": np.asarray(deco.R_seq),
+        "R_dcc": np.asarray(dcc.R_seq),
     }
 
 
@@ -284,37 +284,15 @@ def _run_mvp(asset_tuple: tuple, model_type: str, df_hash: str) -> dict:
 # Diagnostics & tests (batch-4 additions)
 # ---------------------------------------------------------------------------
 
-def _es_stat(eps, s, iu):
-    """Engle-Sheppard (2001) sabit-korelasyon yapay-regresyon istatistiği.
-
-    eps: ortak-standardize artıklar (T,N); s: gecikme; iu: köşegen-üstü indeksler.
-    İstatistik chi^2_{s+1} altında; havuzlanmış (tüm çiftler ortak katsayı) OLS.
-    """
-    import numpy as np
-    from scipy import stats as sstats
-    P = len(iu[0])
-    Y = np.einsum("ti,tj->tij", eps, eps)[:, iu[0], iu[1]]     # (T,P) köşegen-üstü dış çarpım
-    Tn = Y.shape[0]
-    yv = np.concatenate([Y[s:, p] for p in range(P)])
-    Z = np.vstack([
-        np.column_stack([np.ones(Tn - s)] + [Y[s - j:Tn - j, p] for j in range(1, s + 1)])
-        for p in range(P)
-    ])
-    ZtZ = Z.T @ Z
-    d = np.linalg.solve(ZtZ, Z.T @ yv)
-    sig2 = ((yv - Z @ d) ** 2).mean()
-    stat = float(d @ ZtZ @ d / sig2)
-    return stat, s + 1, float(sstats.chi2.sf(stat, s + 1))
-
-
-def _isqrt_apply(R, z):
-    """eps_t = R_t^{-1/2} z_t (her t için simetrik karekök)."""
-    import numpy as np
-    eps = np.empty_like(z)
-    for t in range(len(z)):
-        wv, V = np.linalg.eigh(R[t])
-        eps[t] = (V * (1.0 / np.sqrt(wv))) @ (V.T @ z[t])
-    return eps
+# The Engle-Sheppard machinery now lives in mgarch_diagnostics, where the
+# p-value is opt-in.  See §1.12.1: the chi^2_{s+1} reference is valid for CCC
+# residuals only, never for DCC/ADCC-filtered ones.
+from mgarch_diagnostics import (            # noqa: E402
+    ccc_standardise as _ccc_standardise,
+    es_stat as _es_stat,
+    isqrt_apply as _isqrt_apply,
+    qualitative_reading as _qual,
+)
 
 
 @st.cache_data(show_spinner=False)
@@ -332,9 +310,10 @@ def _run_ccc_test(asset_tuple: tuple, df_hash: str) -> dict:
     dcc = DCCGarch(model_type="DCC")
     z = np.asarray(dcc.fit_univariate_garch(returns))          # CCC = tek değişkenli GARCH artıkları
     Rbar = np.corrcoef(z, rowvar=False)
-    wv, V = np.linalg.eigh(Rbar)
-    eps = z @ (V @ np.diag(1.0 / np.sqrt(wv)) @ V.T).T
-    rows = [(s,) + _es_stat(eps, s, iu) for s in (1, 5, 10)]
+    eps = _ccc_standardise(z)
+    # CCC residuals: the constant-correlation null is exactly the one the
+    # chi^2_{s+1} reference is derived for, so the p-value IS legitimate here.
+    rows = [(s,) + _es_stat(eps, s, iu, return_pvalue=True) for s in (1, 5, 10)]
     return {
         "rows": rows,
         "mean_corr": float(Rbar[iu].mean()),
@@ -345,9 +324,16 @@ def _run_ccc_test(asset_tuple: tuple, df_hash: str) -> dict:
 
 @st.cache_data(show_spinner=False)
 def _run_diagnostics(asset_tuple: tuple, df_hash: str) -> dict:
-    """DCC yeterlilik tanısı: ES testi CCC/DCC/ADCC-filtrelenmiş artıklara (s=5)."""
+    """
+    DCC yeterlilik tanısı: ES istatistiği CCC/DCC/ADCC-filtrelenmiş artıklara
+    (s=5), **p-değeri olmadan** (§1.12.1).  Ek olarak çift-bazlı Ljung-Box +
+    BH-FDR, işaret-yanlılığı ve Hosking-Li-McLeod portmanteau.
+    """
     import numpy as np
     from dcc_garch import DCCGarch
+    from mgarch_diagnostics import (
+        correlation_sign_bias, hosking_li_mcleod, pairwise_ljung_box,
+    )
 
     df = st.session_state.returns_df
     cols = list(asset_tuple)
@@ -360,16 +346,36 @@ def _run_diagnostics(asset_tuple: tuple, df_hash: str) -> dict:
         zz = np.asarray(m.fit_univariate_garch(returns))
         m.fit_dcc(zz)
         eps = _isqrt_apply(np.asarray(m.R_seq), zz)
-        return _es_stat(eps, 5, iu), zz
+        # return_pvalue omitted on purpose: these residuals are filtered.
+        return _es_stat(eps, 5, iu), zz, eps
 
-    out = {}
-    out["DCC"], zdcc = _diag("DCC")
-    out["ADCC"], _ = _diag("ADCC")
-    Rbar = np.corrcoef(zdcc, rowvar=False)                     # CCC: DCC ile aynı z
-    wv, V = np.linalg.eigh(Rbar)
-    epsC = zdcc @ (V @ np.diag(1.0 / np.sqrt(wv)) @ V.T).T
-    out["CCC"] = _es_stat(epsC, 5, iu)
+    out = {"es": {}}
+    out["es"]["DCC"], zdcc, eps_dcc = _diag("DCC")
+    out["es"]["ADCC"], _, _ = _diag("ADCC")
+    epsC = _ccc_standardise(zdcc)                              # CCC: DCC ile aynı z
+    out["es"]["CCC"] = _es_stat(epsC, 5, iu)
+
+    out["pairwise_lb"] = pairwise_ljung_box(eps_dcc, cols, lags=10, alpha=0.05)
+    out["sign_bias"] = correlation_sign_bias(eps_dcc, zdcc, iu)
+    out["hlm"] = hosking_li_mcleod(eps_dcc, m=5)
+    out["cols"] = cols
     return out
+
+
+@st.cache_data(show_spinner=False)
+def _run_univariate_diagnostics(asset_tuple: tuple, df_hash: str) -> list:
+    """Tek değişkenli aşama: LB(z), LB(z²), ARCH-LM, Engle-Ng, Nyblom."""
+    import numpy as np
+    from dcc_garch import DCCGarch
+    from mgarch_diagnostics import univariate_diagnostics
+
+    df = st.session_state.returns_df
+    cols = list(asset_tuple)
+    returns = df[cols]
+
+    m = DCCGarch(model_type="DCC")
+    z = np.asarray(m.fit_univariate_garch(returns))
+    return univariate_diagnostics(z, m.sigmas, returns, m.univariate_models, cols)
 
 
 @st.cache_data(show_spinner=False)
@@ -422,6 +428,90 @@ def _run_cl(asset_tuple: tuple, df_hash: str) -> dict:
     return {"full": (float(aF), float(bF)), "cl": (float(aCL), float(bCL)), "P": int(len(iu[0]))}
 
 
+@st.cache_data(show_spinner=False)
+def _run_factor_selection(asset_tuple: tuple, k_max: int, df_hash: str) -> dict:
+    """Bai-Ng / Onatski / Marchenko-Pastur factor counts on the same panel."""
+    from factor_selection import select_k
+
+    df = st.session_state.returns_df
+    R = df[list(asset_tuple)].values
+    return select_k(R, method="Bai-Ng ICp1", k_max=k_max)
+
+
+@st.cache_data(show_spinner=False)
+def _run_factor_dcc(asset_tuple: tuple, K: int, loading_mode: str,
+                    idio_garch: bool, df_hash: str) -> dict:
+    """Fit the Factor-DCC model and return everything the tab plots."""
+    import numpy as np
+    from factor_dcc import FactorDCC
+
+    df = st.session_state.returns_df
+    cols = list(asset_tuple)
+    returns = df[cols]
+
+    factors = None
+    if loading_mode == "observed":
+        factors = st.session_state.get("factors_df")
+        if factors is None or factors.empty:
+            raise ValueError(
+                "Gözlenen faktör seçilebilmesi için veri yüklerken 'Faktör "
+                "sütunları' belirtilmelidir (Görev D)."
+            )
+        factors = factors.reindex(returns.index).dropna()
+        returns = returns.loc[factors.index]
+
+    model = FactorDCC(K=K, loading_mode=loading_mode, idio_garch=idio_garch)
+    model.fit(returns, factor_returns=factors)
+
+    T = model.Lambda_seq.shape[0]
+    t_mid = T // 2
+    return {
+        "summary": model.summary(),
+        "B": model.B,
+        "factors": model.factors,
+        "cond_vol": model.conditional_vol(),
+        "weights": model.mvp_weights(),
+        "Lambda_seq": model.Lambda_seq,
+        "factor_R": model.factor_correlation(),
+        "index": returns.index,
+        "cols": list(returns.columns),
+        "H_sample": model.H_at(t_mid),
+        "H_sample_t": t_mid,
+        "logdet_sample": model.logdet_H(t_mid),
+        "omega_mean": model.Omega_diag.mean(axis=0),
+    }
+
+
+@st.cache_data(show_spinner=False)
+def _run_go_garch(asset_tuple: tuple, method: str, df_hash: str) -> dict:
+    """Fit GO-GARCH and return the component paths plus implied correlations."""
+    import numpy as np
+    from go_garch import GOGarch
+
+    df = st.session_state.returns_df
+    cols = list(asset_tuple)
+    returns = df[cols]
+
+    model = GOGarch(method=method)
+    model.fit(returns)
+
+    R = model.conditional_correlation()
+    iu = np.triu_indices(len(cols), k=1)
+    return {
+        "summary": model.summary(),
+        "Z": model.Z,
+        "components": model.components,
+        "h_seq": model.h_seq,
+        "cond_vol": model.conditional_vol(),
+        "mean_corr": R[:, iu[0], iu[1]].mean(axis=1),
+        "R_sample": R[len(R) // 2],
+        "R_sample_t": len(R) // 2,
+        "weights": model.mvp_weights(),
+        "index": returns.index,
+        "cols": cols,
+    }
+
+
 def _stress_window(index, returns_values):
     """Şekillerde gölgelenecek stres penceresi (start, end) tarihleri.
 
@@ -459,10 +549,13 @@ def render():
     dh = _df_hash()
     stress = _stress_window(df.index, df[asset_cols].values)
 
-    tab_theory, tab_model, tab_deco, tab_compare, tab_portfolio, tab_diag = st.tabs([
+    (tab_theory, tab_model, tab_deco, tab_factor, tab_go, tab_compare,
+     tab_portfolio, tab_diag) = st.tabs([
         "\U0001f4d6 Teori",
         "⚙️ Model Tahmini",
         "\U0001f504 DECO Modeli",
+        "\U0001f9ee Faktör-DCC",
+        "\U0001f501 GO-GARCH",
         "\U0001f4ca Model Karşılaştırması",
         "\U0001f4bc MVP Portföy",
         "\U0001f9ea Tanılar & Testler",
@@ -540,17 +633,73 @@ $c > 0$ bunu modelleştirir.
             with st.expander("DECO (Engle-Kelly 2012)", expanded=False):
                 st.markdown(r"""
 **Ekikorelasyon (equicorrelation):**
-$$\rho_t = \frac{2}{N(N-1)}\sum_{i<j} R_{ij,t}^{\text{DCC}}$$
+$$\bar\rho_t = \frac{2}{N(N-1)}\sum_{i<j}\frac{q_{ij,t}}{\sqrt{q_{ii,t}q_{jj,t}}}$$
 
 **DECO korelasyon matrisi:**
-$$R_t^{\text{DECO}} = (1-\rho_t)I_N + \rho_t\,\mathbf{1}_N\mathbf{1}_N^\top$$
+$$R_t^{\text{DECO}} = (1-\bar\rho_t)I_N + \bar\rho_t\,\mathbf{1}_N\mathbf{1}_N^\top$$
 
-**Algoritma:**
-1. DCC ile $R_{ij,t}$ dizisini tahmin et
-2. Her $t$ için $\rho_t$ hesapla
-3. $R_t^{\text{DECO}}$ oluştur
+**Kapalı biçim — matris tersi/determinantı yok:**
+$$\log|R_t| = (N-1)\log(1-\bar\rho_t) + \log\bigl(1+(N-1)\bar\rho_t\bigr)$$
+$$z_t'R_t^{-1}z_t = \frac{S_t - c_t G_t^2}{1-\bar\rho_t},\quad
+c_t=\frac{\bar\rho_t}{1+(N-1)\bar\rho_t}$$
 
-**Avantaj:** $N>50$'de $O(1)$ parametre.
+$S_t=\sum_i z_{it}^2$, $G_t=\sum_i z_{it}$.
+
+**Algoritma:** $Q_t$ özyinelemesi DCC ile **aynıdır**; değişen tek şey
+olabilirliğin değerlendirildiği matristir. DECO kendi olabilirliğini
+maksimize eder — DCC'nin $R_t$'sinin ortalaması *değildir*.
+
+**Kısıt:** $\bar\rho_t > -\tfrac{1}{N-1}$ (pozitif tanımlılık).
+""")
+
+        st.divider()
+
+        col5, col6 = st.columns(2)
+
+        with col5:
+            with st.expander("GO-GARCH (van der Weide 2002)", expanded=False):
+                st.markdown(r"""
+**Model:**
+$$r_t = Z\,y_t,\qquad
+\mathbb{E}[y_ty_t'\mid\mathcal F_{t-1}] = V_t = \mathrm{diag}(h_{1t},\dots,h_{Nt})$$
+$$H_t = Z V_t Z'$$
+
+**Ayrıştırma:** $Z = P\Lambda^{1/2}U$ — $(P,\Lambda)$ koşulsuz kovaryansın
+özayrışması, $U$ ortogonal döndürme.
+
+| $U$ nasıl bulunur | Ne varsayar |
+|---|---|
+| $U=I$ (PCA / O-GARCH) | bileşenler yalnızca **koşulsuz** ilişkisiz |
+| FastICA | bileşenler **bağımsız** — koşullu köşegenliğe daha yakın |
+
+**Korelasyon aşaması yoktur:** $N$ tek değişkenli GARCH ve sabit bir $Z$.
+
+**Kimliklendirme:** bileşen sırası, işareti ve ölçeği belirsizdir;
+$Z$'nin sütunları ekonomik olarak yorumlanamaz.
+""")
+
+        with col6:
+            with st.expander("Faktör-DCC (§1.10.3, Not 1.8)", expanded=False):
+                st.markdown(r"""
+**Model:**
+$$H_t = B\Lambda_t B' + \Omega_t$$
+
+$B$: $N\times K$ yükler, $\Lambda_t$: $K$-boyutlu DCC, $\Omega_t$: köşegen
+idiyosenkratik kovaryans.
+
+**$\Omega$ neden zorunlu?** $B\Lambda_tB'$ rank-$K$ tekildir; $H_t^{-1}$ ve
+dolayısıyla MVP yalnızca $\Omega$ sayesinde tanımlıdır.
+
+**Woodbury (zorunlu):**
+$$M_t = \Lambda_t^{-1} + B'\Omega_t^{-1}B \quad (K\times K)$$
+$$H_t^{-1} = \Omega_t^{-1} - \Omega_t^{-1}BM_t^{-1}B'\Omega_t^{-1}$$
+$$\log\det H_t = \log\det\Omega_t + \log\det\Lambda_t + \log\det M_t$$
+
+Maliyet $O(NK^2+K^3)$, $O(N^3)$ değil.
+
+**GO-GARCH ile karşıtlık:** GO-GARCH **döndürmeyi** kısıtlar ($Z$ kare,
+tersinir, $\Omega$ yok); Faktör-DCC **rankı** kısıtlar ($K<N$, $\Omega$
+zorunlu).
 """)
 
         st.divider()
@@ -587,12 +736,20 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
 
         with st.expander("Model Karşılaştırma Tablosu", expanded=False):
             st.markdown(r"""
-| Model | Param. | Avantajlar | Dezavantajlar | Büyük N |
-|-------|--------|------------|---------------|---------|
-| **DCC** | a, b | Basit, yorumlanabilir | $\bar{Q}$ tutarsız | Orta ($N<50$) |
-| **cDCC** | a, b | Tutarlı $\bar{Q}$ | Daha yavaş | Orta ($N<50$) |
-| **ADCC** | a, b, c | Asimetriyi yakalar | Kısıt karmasık | Orta ($N<30$) |
-| **DECO** | a, b | $O(1)$ param., hızlı | Bilgi kaybi | Büyük ($N>50$) |
+| Model | Param. | Gözlem başına maliyet | Avantajlar | Dezavantajlar | Büyük N |
+|-------|--------|---|------------|---------------|---------|
+| **DCC** | $a,b$ (2) | $O(N^3)$ | Basit, yorumlanabilir | $\bar{Q}$ tutarsız | Orta ($N<50$) |
+| **cDCC** | $a,b$ (2) | $O(N^3)$ | Tutarlı $\bar{Q}$ hedefi | Daha yavaş | Orta ($N<50$) |
+| **ADCC** | $a,b,c$ (3) | $O(N^3)$ | Asimetriyi yakalar | Kısıt karmaşık | Orta ($N<30$) |
+| **DECO** | $a,b$ (2) | $O(N)$ | Kapalı biçim, hızlı | Eşkorelasyon kısıtı | Büyük ($N>50$) |
+| **GO-GARCH** | $3N$ | $O(N^2)$ | Korelasyon aşaması yok | $Z$ sabit; yorumlanamaz | Orta |
+| **Faktör-DCC** | $\approx 3K{+}2$ | $O(NK^2{+}K^3)$ | Rank kısıtı + Woodbury | $K$ seçimine duyarlı | Çok büyük |
+
+**Dikkat — sık yapılan hata:** DECO'nun DCC'ye üstünlüğü **parametre
+sayısında değildir**: skaler DCC de DECO da $2$ parametre kullanır. Kazanç,
+gözlem başına $O(N)$ ve $O(N^3)$ hesap maliyeti arasındaki farktadır
+(§1.10.2) — DECO olabilirliği hiçbir $N\times N$ ters/determinant
+gerektirmez.
 """)
 
         # ── Notebook indirme ─────────────────────────────────────────────────
@@ -801,9 +958,13 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
             st.markdown("### DECO -- Dinamik Ekikorelasyon Modeli")
 
             st.info(
-                "DECO, N>50 portföylerde DCC'yi asan hız avantajı sunar: "
-                "O(1) vs O(N^2) parametre. Tum çiftlerin ortalaması olan "
-                "tek bir rho_t serisi tahmin edilir."
+                "**DECO'nun kazancı parametre sayısında değildir.** Skaler DCC "
+                "de DECO da iki parametre (a, b) kullanır. Fark hesap "
+                "maliyetindedir: DECO olabilirliği ρ̄_t üzerinden kapalı "
+                "biçimde değerlendirilir ve hiçbir N×N ters/determinant "
+                "gerektirmez → gözlem başına O(N), DCC'de O(N³) (§1.10.2). "
+                "DECO burada **kendi olabilirliğini** maksimize eder; DCC'nin "
+                "R_t'sinin sonradan alınmış ortalaması değildir."
             )
 
             col_da, col_db = st.columns(2)
@@ -918,36 +1079,434 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
                 )
                 st.plotly_chart(fig_cmp, use_container_width=True)
 
+            # ── DECO R_t vs DCC R_t: eşkorelasyon kısıtının maliyeti ─────
+            st.markdown("#### Eşkorelasyon Kısıtının Maliyeti: $R_t$ Karşılaştırması")
+            R_deco = np.asarray(deco_res["R_deco"])
+            R_dcc = np.asarray(deco_res["R_dcc"])
+            dcols = deco_res["cols"]
+            iu_d = np.triu_indices(len(dcols), k=1)
+            mean_dcc = R_dcc[:, iu_d[0], iu_d[1]].mean(axis=1)
+
+            snap_d = st.select_slider(
+                "Tarih (anlık matris)", options=list(range(len(deco_idx))),
+                value=int(np.argmax(mean_dcc)),
+                format_func=lambda i: str(pd.Timestamp(deco_idx[i]).date()),
+                key="t3_snap",
+            )
+            zmin_d = float(min(R_dcc[snap_d][iu_d].min(), R_deco[snap_d][iu_d].min()))
+
+            hm1, hm2 = st.columns(2)
+            for _col, _R, _ttl in (
+                (hm1, R_dcc[snap_d], "DCC R_t (çiftler serbest)"),
+                (hm2, R_deco[snap_d], "DECO R_t (tek ρ̄_t)"),
+            ):
+                with _col:
+                    _fig = go.Figure(go.Heatmap(
+                        z=_R, x=dcols, y=dcols, colorscale=HEATMAP_CMAP,
+                        zmin=zmin_d, zmax=1.0, text=np.round(_R, 2),
+                        texttemplate="%{text}", textfont=dict(size=9),
+                        colorbar=dict(title="ρ"),
+                    ))
+                    _fig.update_layout(
+                        template=PLOT_TEMPLATE, title=_ttl, height=360,
+                        yaxis=dict(autorange="reversed"),
+                        margin=dict(l=10, r=10, t=50, b=20),
+                    )
+                    st.plotly_chart(_fig, use_container_width=True)
+            st.caption(
+                f"{pd.Timestamp(deco_idx[snap_d]).date()} — DCC çiftleri "
+                f"[{R_dcc[snap_d][iu_d].min():.3f}, {R_dcc[snap_d][iu_d].max():.3f}] "
+                f"aralığına yayılırken DECO hepsini {rho[snap_d]:.3f}'e kısıtlar. "
+                "Aradaki yayılım, eşkorelasyon varsayımının bilgi maliyetidir."
+            )
+
             st.markdown("#### DECO Parametre Özeti")
             deco_a = deco_stats["alpha"]
             deco_b = deco_stats["beta"]
             deco_p = deco_stats["persistence"]
             deco_hl = deco_stats["half_life_days"]
             deco_mc = deco_stats["mean_corr"]
+            dcc_stats_ref = deco_res["dcc_stats"]
 
-            deco_table = pd.DataFrame([{
-                "Model": "DECO",
-                "alpha": f"{deco_a:.4f}",
-                "beta": f"{deco_b:.4f}",
-                "alpha+beta": f"{deco_p:.4f}",
-                "Yarı-Ömür (gün)": f"{deco_hl:.1f}",
-                "Ort. Ekikorelasyon": f"{deco_mc:.4f}",
-                "Ornek Ort. Korelasyon": f"{sample_mean:.4f}",
-            }])
+            deco_table = pd.DataFrame([
+                {
+                    "Model": "DECO",
+                    "alpha": f"{deco_a:.4f}",
+                    "beta": f"{deco_b:.4f}",
+                    "alpha+beta": f"{deco_p:.4f}",
+                    "Yarı-Ömür (gün)": f"{deco_hl:.1f}",
+                    "logL": f"{deco_stats['corr_loglik']:.2f}",
+                    "#par": deco_stats["n_params"],
+                    "Ort. Korelasyon": f"{deco_mc:.4f}",
+                },
+                {
+                    "Model": "DCC (referans)",
+                    "alpha": f"{dcc_stats_ref['alpha']:.4f}",
+                    "beta": f"{dcc_stats_ref['beta']:.4f}",
+                    "alpha+beta": f"{dcc_stats_ref['persistence']:.4f}",
+                    "Yarı-Ömür (gün)": f"{dcc_stats_ref['half_life_days']:.1f}",
+                    "logL": f"{dcc_stats_ref['corr_loglik']:.2f}",
+                    "#par": dcc_stats_ref["n_params"],
+                    "Ort. Korelasyon": f"{dcc_stats_ref['mean_corr']:.4f}",
+                },
+            ])
             st.dataframe(deco_table, use_container_width=True, hide_index=True)
+            st.caption(
+                f"Örnek koşulsuz ortalama korelasyon: {sample_mean:.4f}. "
+                "İki satır **ayrı olabilirliklerden** gelir; aynı çıkmaları "
+                "beklenmez. DCC, DECO'yu içine alan daha geniş bir model "
+                "olduğundan logL'i her zaman ≥ DECO'nunkidir — bu bir üstünlük "
+                "kanıtı değil, iç içe geçmenin (nesting) sonucudur. İkisi "
+                "**iç içe geçmiş değildir** ki LR testi uygulanabilsin: "
+                "karşılaştırma için AIC/BIC ya da tahmin performansı kullanın."
+            )
 
             st.markdown("""
 **Temel Bulgular:**
-- N buyudukce DECO'nun hesaplama avantajı belirginlesir.
-- rho_t'nin yüksek oldugu dönemler piyasa krizlerine işaret eder.
-- DECO, tek bir skaler korelasyon varsayımı yaptıgından portföy
-  çeşitlendirme stratejilerinde muhafazakar bir alt sınır sunar.
+- N büyüdükçe DECO'nun hesaplama avantajı (gözlem başına O(N) vs O(N³))
+  belirginleşir.
+- ρ̄_t'nin yüksek olduğu dönemler piyasa krizlerine işaret eder.
+- DECO tek bir skaler korelasyon varsayımı yaptığından portföy çeşitlendirme
+  stratejilerinde muhafazakâr bir alt sınır sunar.
 """)
         except _NoCompute:
             pass
 
     # =========================================================================
-    # TAB 4 -- MODEL COMPARISON
+    # TAB 4 -- FACTOR-DCC
+    # =========================================================================
+    with tab_factor:
+        try:
+            st.markdown("### Faktör-DCC — $H_t = B\\Lambda_t B' + \\Omega_t$")
+            st.info(
+                "Kimliklendirme: herhangi bir tersinir $Q$ için $B\\to BQ$, "
+                "$\\Lambda_t\\to Q^{-1}\\Lambda_tQ^{-1\\prime}$ dönüşümü $H_t$'yi "
+                "değiştirmez. **PCA seçeneğinde tekil yükler yorumlanamaz**; "
+                "yalnızca faktör uzayı ve açıklanan varyans payları raporlanabilir."
+            )
+
+            fa_c1, fa_c2 = st.columns(2)
+            with fa_c1:
+                f_assets = st.multiselect("Varlıklar (en az 3)", asset_cols,
+                                          default=[], key="tf_assets")
+            with fa_c2:
+                f_mode = st.selectbox(
+                    "Yükler (B)",
+                    ["PCA (istatistiksel)", "Gözlenen faktörlere OLS"],
+                    key="tf_mode",
+                )
+            loading_mode = "pca" if f_mode.startswith("PCA") else "observed"
+
+            if len(f_assets) < 3:
+                st.warning("En az 3 varlık seçiniz.")
+                raise _NoCompute
+
+            k_max = int(min(10, len(f_assets) - 1))
+            sel = _run_factor_selection(tuple(f_assets), k_max, dh)
+
+            st.markdown("#### Aşama 0 — Faktör sayısı $K$")
+            kc1, kc2 = st.columns([2, 1])
+            with kc1:
+                crit_df = pd.DataFrame([
+                    {"Ölçüt": "Bai-Ng ICp1", "K": str(sel["bai_ng"]),
+                     "Not": "standartlaştırılmış panel, k=0 aday kümesinde"},
+                    {"Ölçüt": "Onatski ED",
+                     "K": str(sel["onatski"]) if sel["onatski_ok"] else "—",
+                     "Not": ("özdeğer farkı, yinelemeli δ" if sel["onatski_ok"]
+                             else "N çok küçük: δ kalibrasyonu için yeterli "
+                                  "özdeğer yok")},
+                    {"Ölçüt": "Marchenko-Pastur", "K": str(sel["mp"]),
+                     "Not": f"λ₊ = {sel['lambda_plus']:.3f}"},
+                ])
+                st.dataframe(crit_df, use_container_width=True, hide_index=True)
+                st.caption("Üç ölçüt de aynı **korelasyon** matrisi üzerinde "
+                           "çalışır; ölçek bakımından karşılaştırılabilirler.")
+            with kc2:
+                k_method = st.selectbox(
+                    "K seçimi", ["Bai-Ng ICp1", "Onatski ED",
+                                 "Marchenko-Pastur", "Manuel"], key="tf_kmethod")
+                k_manual = st.number_input("Manuel K", 1, k_max, 1, key="tf_kman")
+                idio_g = st.checkbox("İdiyosenkratik GARCH(1,1) (Ω_t)",
+                                     value=False, key="tf_idio")
+
+            K_map = {"Bai-Ng ICp1": sel["bai_ng"], "Onatski ED": sel["onatski"],
+                     "Marchenko-Pastur": sel["mp"], "Manuel": int(k_manual)}
+            K = max(1, min(int(K_map[k_method]), k_max))
+            if K_map[k_method] < 1 and k_method != "Manuel":
+                st.warning(f"{k_method} ölçütü K=0 verdi (faktör yapısı yok). "
+                           "Grafikler için K=1 kullanılıyor.")
+
+            ev = sel["eigenvalues"]
+            fig_scree = go.Figure()
+            fig_scree.add_trace(go.Bar(
+                x=list(range(1, len(ev) + 1)), y=ev, name="özdeğer",
+                marker_color=COLORS[1],
+            ))
+            fig_scree.add_hline(
+                y=sel["lambda_plus"], line_dash="dash", line_color=COLORS[5],
+                annotation_text=f"MP kenarı λ₊ = {sel['lambda_plus']:.2f}",
+                annotation_position="top right",
+            )
+            fig_scree.update_layout(
+                template=PLOT_TEMPLATE, title="Korelasyon Matrisi Özdeğer Spektrumu",
+                xaxis_title="Sıra", yaxis_title="Özdeğer", height=300,
+                margin=dict(l=20, r=20, t=50, b=30),
+            )
+            st.plotly_chart(fig_scree, use_container_width=True)
+
+            _key = f"d3_fdcc_{'_'.join(sorted(f_assets))}_{K}_{loading_mode}_{idio_g}_{dh}"
+            if st.button("🔄 Hesapla", key="d3_fdcc_run", type="primary"):
+                with st.spinner(f"Faktör-DCC tahmin ediliyor (K={K})..."):
+                    try:
+                        st.session_state[_key] = _run_factor_dcc(
+                            tuple(f_assets), K, loading_mode, idio_g, dh)
+                    except Exception as _exc:
+                        st.error(f"Model tahmini başarısız oldu: `{_exc}`")
+                        raise _NoCompute
+
+            if _key not in st.session_state:
+                st.info("⬆️ Parametreleri seçip **🔄 Hesapla**'ya tıklayın.")
+                raise _NoCompute
+
+            fres = st.session_state[_key]
+            fsum = fres["summary"]
+            fidx = fres["index"]
+
+            m1, m2, m3, m4 = st.columns(4)
+            with m1:
+                st.markdown(_metric_card("K", f"{fsum['K']}", fsum["loading_mode"]),
+                            unsafe_allow_html=True)
+            with m2:
+                st.markdown(_metric_card("Açıklanan varyans",
+                                         f"{fsum['var_share_total']:.1%}",
+                                         "ilk K bileşen"), unsafe_allow_html=True)
+            with m3:
+                st.markdown(_metric_card("Ort. idiyosenkratik pay",
+                                         f"{fsum['mean_idio_share']:.1%}",
+                                         "Ω / H köşegeni"), unsafe_allow_html=True)
+            with m4:
+                _hl = fsum.get("factor_half_life")
+                st.markdown(_metric_card("Faktör yarı-ömrü",
+                                         "—" if _hl is None else f"{_hl:.1f} g",
+                                         fsum["factor_model"]),
+                            unsafe_allow_html=True)
+            st.markdown("")
+
+            fig_f = go.Figure()
+            for k in range(fsum["K"]):
+                fig_f.add_trace(go.Scatter(
+                    x=fidx, y=fres["factors"][:, k], mode="lines",
+                    name=f"F{k+1} ({fsum['var_share'][k]:.1%})",
+                    line=dict(color=COLORS[k % len(COLORS)], width=1.0),
+                ))
+            fig_f.add_vrect(x0=stress[0], x1=stress[1], fillcolor="gray",
+                            opacity=0.15, line_width=0)
+            fig_f.update_layout(
+                template=PLOT_TEMPLATE, title="Çıkarılan Faktör Getirileri f_t",
+                xaxis_title="Tarih", yaxis_title="Getiri", height=320,
+                margin=dict(l=20, r=20, t=50, b=30),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                            xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_f, use_container_width=True)
+
+            fR = fres["factor_R"]
+            if fR is not None and fsum["K"] >= 2:
+                iu_f = np.triu_indices(fsum["K"], k=1)
+                fig_fr = go.Figure()
+                for k, (i, j) in enumerate(zip(*iu_f)):
+                    fig_fr.add_trace(go.Scatter(
+                        x=fidx, y=fR[:, i, j], mode="lines",
+                        name=f"F{i+1}–F{j+1}",
+                        line=dict(color=COLORS[k % len(COLORS)], width=1.2),
+                    ))
+                fig_fr.update_layout(
+                    template=PLOT_TEMPLATE,
+                    title="Faktörler Arası Dinamik Korelasyon Λ_t (DCC)",
+                    xaxis_title="Tarih", yaxis_title="Korelasyon", height=300,
+                    margin=dict(l=20, r=20, t=50, b=30),
+                )
+                st.plotly_chart(fig_fr, use_container_width=True)
+
+            st.markdown("#### Woodbury doğrulaması (bu tahminde)")
+            t_s = fres["H_sample_t"]
+            H_s = np.asarray(fres["H_sample"])
+            sign_s, ld_direct = np.linalg.slogdet(H_s)
+            wc1, wc2, wc3 = st.columns(3)
+            wc1.metric("log det H_t (lemma)", f"{fres['logdet_sample']:.6f}")
+            wc2.metric("log det H_t (slogdet)", f"{ld_direct:.6f}")
+            wc3.metric("Mutlak fark",
+                       f"{abs(fres['logdet_sample'] - ld_direct):.2e}")
+            st.caption(
+                f"t = {pd.Timestamp(fidx[t_s]).date()}. Uygulamada $H_t$ hiç "
+                "kurulmaz ve tersi alınmaz; burada yalnızca doğrulama amacıyla "
+                "tek bir $t$ için açıkça hesaplanmıştır. Maliyet "
+                f"$O(NK^2+K^3)$, $O(N^3)$ değil."
+            )
+
+            with st.expander("Yükler B (yalnızca faktör uzayı yorumlanabilir)",
+                             expanded=False):
+                st.dataframe(
+                    pd.DataFrame(fres["B"], index=fres["cols"],
+                                 columns=[f"F{k+1}" for k in range(fsum["K"])]
+                                 ).round(4),
+                    use_container_width=True,
+                )
+        except _NoCompute:
+            pass
+
+    # =========================================================================
+    # TAB 5 -- GO-GARCH
+    # =========================================================================
+    with tab_go:
+        try:
+            st.markdown("### GO-GARCH — $r_t = Z y_t$, $H_t = Z V_t Z'$")
+            st.info(
+                "Bileşen sırası, işareti ve ölçeği kimliklendirilemez: "
+                "$(Z,V_t)$ ile $(ZDS,\\,S D^{-1}V_tD^{-1}S)$ aynı $H_t$'yi "
+                "verir. $Z$'nin sütunlarına ekonomik anlam yüklemeyin; "
+                "$H_t$ ve varyans payları değişmezdir."
+            )
+
+            gc1, gc2 = st.columns(2)
+            with gc1:
+                g_assets = st.multiselect("Varlıklar (2-8)", asset_cols,
+                                          default=[], key="tg_assets")
+            with gc2:
+                g_method = st.selectbox(
+                    "Döndürme $U$",
+                    ["ICA (FastICA — bağımsız bileşenler)",
+                     "PCA (U = I — O-GARCH)"],
+                    key="tg_method",
+                )
+            method = "ica" if g_method.startswith("ICA") else "pca"
+
+            if not (2 <= len(g_assets) <= 8):
+                st.warning("2 ile 8 arasında varlık seçiniz.")
+                raise _NoCompute
+
+            _key = f"d3_go_{'_'.join(sorted(g_assets))}_{method}_{dh}"
+            if st.button("🔄 Hesapla", key="d3_go_run", type="primary"):
+                with st.spinner(f"GO-GARCH tahmin ediliyor ({method})..."):
+                    try:
+                        st.session_state[_key] = _run_go_garch(
+                            tuple(g_assets), method, dh)
+                    except Exception as _exc:
+                        st.error(f"Model tahmini başarısız oldu: `{_exc}`")
+                        raise _NoCompute
+
+            if _key not in st.session_state:
+                st.info("⬆️ Parametreleri seçip **🔄 Hesapla**'ya tıklayın.")
+                raise _NoCompute
+
+            gres = st.session_state[_key]
+            gsum = gres["summary"]
+            gidx = gres["index"]
+
+            g1, g2, g3 = st.columns(3)
+            with g1:
+                st.markdown(_metric_card("Yöntem", gsum["method"].upper(),
+                                         "U döndürmesi"), unsafe_allow_html=True)
+            with g2:
+                st.markdown(_metric_card("Parametre", f"{gsum['n_params']}",
+                                         "3N (Z profillenmiş)"),
+                            unsafe_allow_html=True)
+            with g3:
+                st.markdown(_metric_card("logL", f"{gsum['loglik']:.1f}",
+                                         "Gauss, sabit hariç"),
+                            unsafe_allow_html=True)
+            st.markdown("")
+
+            comp_df = pd.DataFrame(gsum["components"])
+            comp_df = comp_df.assign(
+                alpha=comp_df["alpha"].round(4), beta=comp_df["beta"].round(4),
+                persistence=comp_df["persistence"].round(4),
+                half_life=comp_df["half_life"].round(1),
+                var_share=(comp_df["var_share"] * 100).round(1),
+            ).rename(columns={
+                "component": "Bileşen", "alpha": "α", "beta": "β",
+                "persistence": "α+β", "half_life": "Yarı-Ömür (gün)",
+                "var_share": "Varyans payı (%)",
+            })
+            st.dataframe(comp_df, use_container_width=True, hide_index=True)
+
+            # The components are whitened: their UNCONDITIONAL variance is 1 by
+            # construction, so sqrt(h_it) is a unit-free multiple of that, not a
+            # percentage return volatility.  Plotting it as "%" would show a
+            # meaningless 100-300 axis.
+            fig_gc = go.Figure()
+            for i in range(min(gsum["N"], len(COLORS))):
+                fig_gc.add_trace(go.Scatter(
+                    x=gidx, y=np.sqrt(gres["h_seq"][:, i]), mode="lines",
+                    name=f"y{i+1}", line=dict(color=COLORS[i % len(COLORS)],
+                                              width=1.0),
+                ))
+            fig_gc.add_hline(y=1.0, line_dash="dot", line_color="gray",
+                             annotation_text="koşulsuz düzey = 1",
+                             annotation_position="bottom right")
+            fig_gc.add_vrect(x0=stress[0], x1=stress[1], fillcolor="gray",
+                             opacity=0.15, line_width=0)
+            fig_gc.update_layout(
+                template=PLOT_TEMPLATE,
+                title="Bileşen Koşullu Standart Sapmaları √h_it (birimsiz)",
+                xaxis_title="Tarih", yaxis_title="√h_it", height=320,
+                margin=dict(l=20, r=20, t=50, b=30),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                            xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_gc, use_container_width=True)
+            st.caption(
+                "Bileşenler beyazlatılmıştır: koşulsuz varyansları tanım gereği "
+                "1'dir. Dolayısıyla √h_it bir yüzde getiri oynaklığı değil, "
+                "koşulsuz düzeye göre bir çarpandır. Varlık bazında yüzde "
+                "oynaklık için H_t'nin köşegenine bakınız."
+            )
+
+            fig_gv = go.Figure()
+            for i, cname in enumerate(gres["cols"]):
+                fig_gv.add_trace(go.Scatter(
+                    x=gidx, y=gres["cond_vol"][:, i] * 100, mode="lines",
+                    name=cname, line=dict(color=COLORS[i % len(COLORS)], width=1.0),
+                ))
+            fig_gv.update_layout(
+                template=PLOT_TEMPLATE,
+                title="Varlık Koşullu Standart Sapması √diag(H_t) (%)",
+                xaxis_title="Tarih", yaxis_title="Volatilite (%)", height=300,
+                margin=dict(l=20, r=20, t=50, b=30),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                            xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_gv, use_container_width=True)
+
+            fig_gr = go.Figure()
+            fig_gr.add_vrect(x0=stress[0], x1=stress[1], fillcolor="gray",
+                             opacity=0.15, line_width=0)
+            fig_gr.add_trace(go.Scatter(
+                x=gidx, y=gres["mean_corr"], mode="lines",
+                name="GO-GARCH ort. korelasyon",
+                line=dict(color=COLORS[0], width=1.6),
+            ))
+            fig_gr.update_layout(
+                template=PLOT_TEMPLATE,
+                title="H_t'nin İma Ettiği Ortalama Koşullu Korelasyon",
+                xaxis_title="Tarih", yaxis_title="Korelasyon", height=300,
+                margin=dict(l=20, r=20, t=50, b=30),
+            )
+            st.plotly_chart(fig_gr, use_container_width=True)
+            st.caption(
+                "GO-GARCH'ta ayrı bir korelasyon aşaması yoktur: korelasyon "
+                "dinamiği tamamen bileşen varyanslarının $h_{it}$ değişiminden "
+                "ve sabit $Z$'den doğar. DCC ile karşıtlık budur."
+            )
+
+            if gsum["method"] == "ica" and gsum["ica_converged"] is False:
+                st.warning("FastICA maksimum yineleme sayısına ulaştı; "
+                           "sonuçlar başlangıç değerine duyarlı olabilir.")
+        except _NoCompute:
+            pass
+
+    # =========================================================================
+    # TAB 6 -- MODEL COMPARISON
     # =========================================================================
     with tab_compare:
         try:
@@ -994,12 +1553,25 @@ GARCH + DCC bunu $2N + 2$'ye indirir.
                     "beta": round(s["beta"], 4),
                     "alpha+beta": round(s["persistence"], 4),
                     "Yarı-Ömür (gün)": round(s["half_life_days"], 1),
+                    "logL": round(s["corr_loglik"], 2),
+                    "#par": s["n_params"],
+                    "AIC": round(s["aic"], 1),
+                    "BIC": round(s["bic"], 1),
                     "Ort. Korelasyon": round(s["mean_corr"], 4),
                     "Çiftler Arası Std": round(s.get("corr_cross_std", 0.0), 4),
                 })
 
             df_cmp = pd.DataFrame(rows)
             st.markdown("#### Parametre Karşılaştırması")
+            st.caption(
+                "**logL yorumu.** DCC ve cDCC iç içe geçmemiş ama aynı "
+                "korelasyon uzayında; DECO ise DCC'nin **kısıtlı** halidir "
+                "(tüm çiftler tek ρ̄_t). Bu nedenle DCC'nin logL'i DECO'nunkinden "
+                "büyük çıkar — bu bir üstünlük kanıtı değil, kısıtın maliyetidir. "
+                "Modeller aynı sayıda parametre kullandığından AIC/BIC sıralaması "
+                "logL sıralamasıyla aynıdır; asıl karar ölçütü örneklem-dışı "
+                "tahmin performansı ve N ölçeklenmesidir."
+            )
 
             def _highlight_persist(val):
                 try:
@@ -1354,10 +1926,12 @@ $$w_t = \frac{H_t^{-1}\mathbf{1}}{\mathbf{1}^\top H_t^{-1}\mathbf{1}}$$
                 if st.button("🔄 Hesapla", key="d3_diag_run", type="primary"):
                     with st.spinner("Tanılar hesaplanıyor..."):
                         try:
+                            uni = _run_univariate_diagnostics(da, dh)
                             ccc = _run_ccc_test(da, dh)
                             dg = _run_diagnostics(da, dh)
                             cl = _run_cl(da, dh)
-                            st.session_state[_key] = {"ccc": ccc, "dg": dg, "cl": cl}
+                            st.session_state[_key] = {"uni": uni, "ccc": ccc,
+                                                      "dg": dg, "cl": cl}
                         except Exception as _exc:
                             st.error(f"Tanı hesabı başarısız oldu: `{_exc}`")
                             raise _NoCompute
@@ -1367,66 +1941,290 @@ $$w_t = \frac{H_t^{-1}\mathbf{1}}{\mathbf{1}^\top H_t^{-1}\mathbf{1}}$$
                     st.info("⬆️ Parametreleri seçip **🔄 Hesapla**'ya tıklayın.")
                 else:
                     _diag_data = st.session_state[_key]
+                    uni = _diag_data["uni"]
                     ccc = _diag_data["ccc"]
                     dg = _diag_data["dg"]
                     cl = _diag_data["cl"]
 
-                    # 1) CCC + Engle-Sheppard sabit-korelasyon testi
-                    st.markdown("#### 1. Sabit Koşullu Korelasyon (CCC) ve Engle-Sheppard Testi")
-                    st.markdown(
-                        r"$H_0:\ R_t=\bar R\ \forall t$. ES yapay-regresyonu "
-                        r"$\hat\delta' X'X\hat\delta/\hat\sigma^2 \sim \chi^2_{s+1}$."
-                    )
-                    c1, c2, c3 = st.columns(3)
-                    with c1:
-                        st.markdown(_metric_card("CCC parametre", f"{ccc['n_params']}",
-                                                 "3N + N(N-1)/2"), unsafe_allow_html=True)
-                    with c2:
-                        st.markdown(_metric_card("Ort. koşulsuz kor.", f"{ccc['mean_corr']:.3f}"),
-                                    unsafe_allow_html=True)
-                    with c3:
-                        st.markdown(_metric_card("Gözlem (T x N)", f"{ccc['T']} x {ccc['N']}"),
-                                    unsafe_allow_html=True)
-                    es_df = pd.DataFrame([
-                        {"Gecikme s": s, "chi2 (df=s+1)": f"{stat:.1f}", "p-değeri": f"{p:.2e}",
-                         "Karar": "CCC reddedilir" if p < 0.01 else "reddedilemez"}
-                        for s, stat, _df, p in ccc["rows"]
+                    sub_uni, sub_corr, sub_boot, sub_hd = st.tabs([
+                        "1️⃣ Tek Değişkenli Aşama",
+                        "2️⃣ Korelasyon Aşaması",
+                        "3️⃣ Parametrik Bootstrap",
+                        "4️⃣ Yüksek Boyut",
                     ])
-                    st.dataframe(es_df, use_container_width=True, hide_index=True)
-                    st.caption("CCC reddi, koşullu korelasyonun zamanla değiştiğini ve DCC genellemesinin "
-                               "ampirik gerekçesini gösterir (Engle-Sheppard 2001; Tse 2000).")
 
-                    # 2) DCC yeterlilik tanısı
-                    st.markdown("#### 2. DCC Yeterlilik Tanısı (filtreleme sonrası)")
-                    st.markdown(
-                        r"Model-standardize artıklar $\varepsilon_t=R_t^{-1/2}z_t$ IID + $\mathrm{Cov}=I$ "
-                        r"olmalı; aynı ES testi filtrelenmiş artıklara uygulanır ($s=5$)."
-                    )
-                    dg_df = pd.DataFrame([
-                        {"Filtre": nm, "chi2 (df=6)": f"{dg[nm][0]:.1f}", "p-değeri": f"{dg[nm][2]:.2e}",
-                         "Kalan dinamik": "güçlü (red)" if dg[nm][2] < 0.01 else "yok (red edilemez)"}
-                        for nm in ("CCC", "DCC", "ADCC")
-                    ])
-                    st.dataframe(dg_df, use_container_width=True, hide_index=True)
-                    st.caption("Sabit korelasyon devasa kalıntı bırakırken DCC/ADCC filtrelemesi artıkları "
-                               "temizler. Not: ES doğrusal kalıntıyı yakalar; DGP asimetrik olsa da hem DCC "
-                               "hem ADCC reddedilemeyebilir (asimetri için hedefli test gerekir).")
+                    # ── 1) UNIVARIATE STAGE ─────────────────────────────
+                    with sub_uni:
+                        st.markdown("#### Marjinal GARCH(1,1) Yeterliliği")
+                        st.markdown(
+                            "İki aşamalı QMLE'de korelasyon tanıları, marjinallerin "
+                            "doğru belirtilmiş olduğunu **varsayar**. Marjinal "
+                            "aşama reddediliyorsa $z_t$ zaten bozuktur ve "
+                            "korelasyon tanıları yorumlanamaz — bu yüzden bu "
+                            "sekme önce gelir."
+                        )
+                        uni_df = pd.DataFrame([{
+                            "Varlık": r["asset"],
+                            "LB(z,10)": f"{r['lb_z']:.1f}",
+                            "p": f"{r['lb_z_p']:.3f}",
+                            "LB(z²,10)": f"{r['lb_z2']:.1f}",
+                            "p ": f"{r['lb_z2_p']:.3f}",
+                            "ARCH-LM(10)": f"{r['arch_lm']:.1f}",
+                            "p  ": f"{r['arch_lm_p']:.3f}",
+                            "Engle-Ng (χ²₃)": f"{r['sign_bias']:.1f}",
+                            "p   ": f"{r['sign_bias_p']:.3f}",
+                            "Nyblom L": ("—" if not np.isfinite(r.get("nyblom", np.nan))
+                                         else f"{r['nyblom']:.2f}"),
+                            "Nyblom %5": ("—" if r.get("nyblom_crit") is None
+                                          else f"{r['nyblom_crit']:.2f}"),
+                        } for r in uni])
+                        st.dataframe(uni_df, use_container_width=True, hide_index=True)
+                        st.caption(
+                            "Bu tabloda p-değerleri **meşrudur**: testler tek "
+                            "değişkenli, tek bir tahmin katmanına dayalı "
+                            "artıklara uygulanır. LB(z²) ve ARCH-LM reddi → "
+                            "oynaklık denklemi yetersiz; Engle-Ng reddi → "
+                            "asimetri (GJR/EGARCH gerekir); Nyblom L > kritik "
+                            "değer → parametreler örneklem boyunca sabit değil "
+                            "(yapısal kırılma)."
+                        )
 
-                    # 3) Bileşik olabilirlik
-                    st.markdown("#### 3. Yüksek Boyut: İkili Bileşik Olabilirlik (Pakel vd. 2021)")
-                    st.markdown(
-                        r"$(a,b)$ skaler ve çiftlerde ortak $\Rightarrow$ ikili alt-olabilirlikler "
-                        r"$c\ell(a,b)=\sum_{i<j}\ell_{ij}$ tutarlı; $O(N^3)$ matris tersi yok."
-                    )
-                    cl_df = pd.DataFrame([
-                        {"Yöntem": "Tam DCC (ML)", "a": f"{cl['full'][0]:.4f}", "b": f"{cl['full'][1]:.4f}",
-                         "a+b": f"{cl['full'][0] + cl['full'][1]:.4f}"},
-                        {"Yöntem": f"İkili CL ({cl['P']} çift)", "a": f"{cl['cl'][0]:.4f}",
-                         "b": f"{cl['cl'][1]:.4f}", "a+b": f"{cl['cl'][0] + cl['cl'][1]:.4f}"},
-                    ])
-                    st.dataframe(cl_df, use_container_width=True, hide_index=True)
-                    st.caption("İkili CL, DCC dinamiğini tutarlı geri kazanır (küçük verimlilik kaybıyla). "
-                               "Hesaplama avantajı asimptotiktir: yüzlerce varlıkta uygulanabilir tek yol.")
+                    # ── 2) CORRELATION STAGE ────────────────────────────
+                    with sub_corr:
+                        st.markdown("#### A. Sabit Koşullu Korelasyon (CCC) — Engle-Sheppard")
+                        st.markdown(
+                            r"$H_0:\ R_t=\bar R\ \forall t$. ES yapay-regresyonu "
+                            r"$\hat\delta' X'X\hat\delta/\hat\sigma^2 \sim \chi^2_{s+1}$."
+                        )
+                        c1, c2, c3 = st.columns(3)
+                        with c1:
+                            st.markdown(_metric_card("CCC parametre", f"{ccc['n_params']}",
+                                                     "3N + N(N-1)/2"), unsafe_allow_html=True)
+                        with c2:
+                            st.markdown(_metric_card("Ort. koşulsuz kor.", f"{ccc['mean_corr']:.3f}"),
+                                        unsafe_allow_html=True)
+                        with c3:
+                            st.markdown(_metric_card("Gözlem (T x N)", f"{ccc['T']} x {ccc['N']}"),
+                                        unsafe_allow_html=True)
+                        es_df = pd.DataFrame([
+                            {"Gecikme s": s, "chi2 (df=s+1)": f"{stat:.1f}", "p-değeri": f"{p:.2e}",
+                             "Karar": "CCC reddedilir" if p < 0.01 else "reddedilemez"}
+                            for s, stat, _df, p in ccc["rows"]
+                        ])
+                        st.dataframe(es_df, use_container_width=True, hide_index=True)
+                        st.success(
+                            "**Bu p-değerleri geçerlidir.** Test, CCC artıklarına "
+                            "(sabit $\\bar R^{-1/2}$ ile standardize) uygulanır — "
+                            "χ²_{s+1} referansının türetildiği durumun ta kendisi. "
+                            "CCC reddi, DCC genellemesinin ampirik gerekçesidir "
+                            "(Engle-Sheppard 2001; Tse 2000)."
+                        )
+
+                        st.divider()
+                        st.markdown("#### B. DCC Yeterlilik Tanısı (filtreleme sonrası)")
+                        st.markdown(
+                            r"Model-standardize artıklar $\varepsilon_t=R_t^{-1/2}z_t$ "
+                            r"IID + $\mathrm{Cov}=I$ olmalı; aynı ES istatistiği "
+                            r"filtrelenmiş artıklara uygulanır ($s=5$)."
+                        )
+                        dg_es = dg["es"]
+                        dg_df = pd.DataFrame([
+                            {"Filtre": nm,
+                             "İstatistik (s=5)": f"{dg_es[nm][0]:.1f}",
+                             "Nitel okuma": _qual(dg_es[nm][0])}
+                            for nm in ("CCC", "DCC", "ADCC")
+                        ])
+                        st.dataframe(dg_df, use_container_width=True, hide_index=True)
+                        st.warning(
+                            "**p-değeri ve biçimsel karar sütunu bilinçli olarak "
+                            "yoktur (§1.12.1).** Filtrelenmiş artıklara uygulanan "
+                            "bu istatistiğin χ²₆ referansı geçersizdir:\n\n"
+                            "1. **İki katmanlı tahmin hatası.** $R_t$ kendisi "
+                            "tahmin edilmiştir; yapay regresyon onu biliniyormuş "
+                            "gibi ele alır.\n"
+                            "2. **Havuzlama tek-skaler-$\\hat\\sigma^2$ varsayar.** "
+                            "$t(\\nu)$ yenilik altında "
+                            "$\\mathrm{Var}(\\varepsilon_i\\varepsilon_j)=(\\nu-2)/(\\nu-4)$; "
+                            "$\\nu=7$'de gerçek ölçek ≈ 1.67, $\\nu\\le 4$'te "
+                            "dördüncü moment yoktur ve asimptotik χ² **tanımsızdır**.\n"
+                            "3. **Gecikmeli regresörler içseldir.**\n\n"
+                            "Nitel okuma eşikleri: < 20 → kalan dinamik izi yok; "
+                            "> 100 → güçlü kalan dinamik; arası → belirsiz, "
+                            "bootstrap gerekir (3. sekme)."
+                        )
+
+                        st.divider()
+                        st.markdown("#### C. Çift-Bazlı Ljung-Box + Benjamini-Hochberg FDR")
+                        plb = dg["pairwise_lb"]
+                        st.caption(
+                            f"DCC-filtrelenmiş $\\varepsilon_i\\varepsilon_j$ "
+                            f"serilerinde LB({plb['lags']}); {plb['n_pairs']} çift "
+                            f"üzerinde BH-FDR (α={plb['alpha']}). Havuzlanmış ES "
+                            "testinin aksine bu, **hangi** çiftin kalıntı "
+                            "taşıdığını söyler."
+                        )
+                        pc1, pc2 = st.columns([1, 2])
+                        with pc1:
+                            st.markdown(_metric_card(
+                                "Reddedilen çift",
+                                f"{plb['n_reject']} / {plb['n_pairs']}",
+                                "BH-FDR sonrası"), unsafe_allow_html=True)
+                        with pc2:
+                            st.dataframe(pd.DataFrame([{
+                                "Çift": r["pair"],
+                                "LB": f"{r['lb_stat']:.1f}",
+                                "p (ham)": f"{r['p_raw']:.3f}",
+                                "p (BH)": f"{r['p_bh']:.3f}",
+                                "Red": "✔" if r["reject"] else "",
+                            } for r in plb["rows"][:5]]),
+                                use_container_width=True, hide_index=True)
+                        st.caption("En güçlü 5 çift gösterilmektedir.")
+
+                        st.divider()
+                        st.markdown("#### D. İşaret-Yanlılığı Testi (hedefli)")
+                        sb = dg["sign_bias"]
+                        st.markdown(
+                            r"$Y_{ij,t}= \omega + b_1\mathbf{1}\{z_{i,t-1}<0\} "
+                            r"+ b_2\mathbf{1}\{z_{j,t-1}<0\} "
+                            r"+ b_3\mathbf{1}\{z_{i,t-1}<0\}\mathbf{1}\{z_{j,t-1}<0\}$"
+                        )
+                        sc1, sc2, sc3, sc4 = st.columns(4)
+                        sc1.metric("Wald (df=3)", f"{sb['stat']:.1f}")
+                        sc2.metric("b₁ (i negatif)", f"{sb['coef']['neg_i']:.4f}")
+                        sc3.metric("b₂ (j negatif)", f"{sb['coef']['neg_j']:.4f}")
+                        sc4.metric("b₃ (ikisi de)", f"{sb['coef']['neg_both']:.4f}")
+                        st.caption(
+                            "Havuzlanmış ES testi **doğrusal** kalıntıyı yakalar, "
+                            "eksik asimetriyi yakalayamaz; bu test tam olarak onu "
+                            "hedefler. p-değeri burada da verilmez — aynı üç "
+                            "gerekçe geçerlidir; bootstrap sekmesini kullanın."
+                        )
+
+                        st.divider()
+                        st.markdown("#### E. Hosking-Li-McLeod Portmanteau")
+                        hlm = dg["hlm"]
+                        if hlm["available"]:
+                            hc1, hc2, hc3 = st.columns(3)
+                            hc1.metric("Q̃", f"{hlm['stat']:.1f}")
+                            hc2.metric("sd = m·P²", f"{hlm['df']}")
+                            hc3.metric("p (nominal)", f"{hlm['p_value']:.3f}")
+                            st.caption(
+                                f"P = N(N−1)/2 = {hlm['P']}, m = {hlm['m']}. "
+                                "Nominal p, aynı iki katmanlı tahmin hatası "
+                                "nedeniyle yalnızca göstergedir."
+                            )
+                        else:
+                            st.info(f"⏭️ Devre dışı — {hlm['reason']}")
+
+                    # ── 3) PARAMETRIC BOOTSTRAP ─────────────────────────
+                    with sub_boot:
+                        st.markdown("#### Parametrik Bootstrap p-Değeri")
+                        st.markdown(
+                            "Filtrelenmiş artıklardaki istatistiklerin geçerli "
+                            "referans dağılımını üretmenin tek yolu: sığdırılmış "
+                            "modelden yol simüle et ve **her yolda modeli baştan "
+                            "kestir**."
+                        )
+                        st.warning(
+                            "⚠️ **Yavaş.** Her replikasyonda N tek değişkenli "
+                            "GARCH **ve** korelasyon aşaması yeniden kestirilir; "
+                            "$\\hat\\theta$ sabitlenirse bootstrap anlamsızdır "
+                            "(§1.12.1, 3. adım). B=199, N=5, T=1500 için kabaca "
+                            "**dakikalar** mertebesinde sürer. Ders sırasında "
+                            "önceden çalıştırmanız önerilir."
+                        )
+                        bc1, bc2, bc3 = st.columns(3)
+                        with bc1:
+                            B = st.selectbox("Replikasyon B", [199, 499, 999],
+                                             key="t6_B")
+                        with bc2:
+                            b_model = st.selectbox("Null model", ["DCC", "ADCC"],
+                                                   key="t6_bmodel")
+                        with bc3:
+                            b_stat = st.selectbox(
+                                "İstatistik", ["Engle-Sheppard (s=5)",
+                                               "İşaret-yanlılığı"], key="t6_bstat")
+
+                        _bkey = f"d3_boot_{'_'.join(sorted(diag_assets))}_{B}_{b_model}_{b_stat}_{dh}"
+                        if st.button("🎲 Bootstrap'i Çalıştır", key="d3_boot_run"):
+                            from mgarch_diagnostics import (
+                                correlation_sign_bias, es_stat,
+                                parametric_bootstrap_pvalue,
+                            )
+                            _iu = np.triu_indices(len(diag_assets), k=1)
+                            if b_stat.startswith("Engle"):
+                                def _statfn(eps, z, m):
+                                    return es_stat(eps, 5, _iu)[0]
+                                observed = dg["es"][b_model][0]
+                            else:
+                                def _statfn(eps, z, m):
+                                    return correlation_sign_bias(eps, z, _iu)["stat"]
+                                observed = dg["sign_bias"]["stat"]
+
+                            bar = st.progress(0.0, text="Bootstrap çalışıyor…")
+                            try:
+                                res_b = parametric_bootstrap_pvalue(
+                                    df[list(diag_assets)], b_model, _statfn,
+                                    observed, B=B,
+                                    progress=lambda d, tot: bar.progress(
+                                        d / tot, text=f"Bootstrap {d}/{tot}"),
+                                )
+                                st.session_state[_bkey] = res_b
+                            except Exception as _exc:
+                                st.error(f"Bootstrap başarısız: `{_exc}`")
+                            finally:
+                                bar.empty()
+
+                        if _bkey in st.session_state:
+                            rb = st.session_state[_bkey]
+                            rc1, rc2, rc3 = st.columns(3)
+                            rc1.metric("Gözlenen istatistik", f"{rb['observed']:.1f}")
+                            rc2.metric("Bootstrap p", f"{rb['p_value']:.4f}")
+                            rc3.metric("Başarılı replikasyon",
+                                       f"{rb['B']}" + (f" (−{rb['n_failed']})"
+                                                       if rb["n_failed"] else ""))
+                            fig_b = go.Figure()
+                            fig_b.add_trace(go.Histogram(
+                                x=rb["boot_stats"], nbinsx=40,
+                                marker_color=COLORS[1], name="bootstrap null"))
+                            fig_b.add_vline(
+                                x=rb["observed"], line_color=COLORS[5],
+                                line_width=2,
+                                annotation_text="gözlenen",
+                                annotation_position="top right")
+                            fig_b.update_layout(
+                                template=PLOT_TEMPLATE,
+                                title="Bootstrap Null Dağılımı",
+                                xaxis_title="İstatistik", yaxis_title="Frekans",
+                                height=320, margin=dict(l=20, r=20, t=50, b=30),
+                            )
+                            st.plotly_chart(fig_b, use_container_width=True)
+                            st.caption(
+                                "p = (1 + #{boot ≥ gözlenen}) / (1 + B). Ekleme, "
+                                "p'nin tam olarak 0 çıkmasını engeller "
+                                "(Davison-Hinkley)."
+                            )
+
+                    # ── 4) HIGH DIMENSION ───────────────────────────────
+                    with sub_hd:
+                        st.markdown("#### İkili Bileşik Olabilirlik (Pakel vd. 2021)")
+                        st.markdown(
+                            r"$(a,b)$ skaler ve çiftlerde ortak $\Rightarrow$ ikili "
+                            r"alt-olabilirlikler $c\ell(a,b)=\sum_{i<j}\ell_{ij}$ "
+                            r"tutarlı; $O(N^3)$ matris tersi yok."
+                        )
+                        cl_df = pd.DataFrame([
+                            {"Yöntem": "Tam DCC (ML)", "a": f"{cl['full'][0]:.4f}",
+                             "b": f"{cl['full'][1]:.4f}",
+                             "a+b": f"{cl['full'][0] + cl['full'][1]:.4f}"},
+                            {"Yöntem": f"İkili CL ({cl['P']} çift)", "a": f"{cl['cl'][0]:.4f}",
+                             "b": f"{cl['cl'][1]:.4f}",
+                             "a+b": f"{cl['cl'][0] + cl['cl'][1]:.4f}"},
+                        ])
+                        st.dataframe(cl_df, use_container_width=True, hide_index=True)
+                        st.caption("İkili CL, DCC dinamiğini tutarlı geri kazanır "
+                                   "(küçük verimlilik kaybıyla). Hesaplama avantajı "
+                                   "asimptotiktir: yüzlerce varlıkta uygulanabilir tek yol.")
         except _NoCompute:
             pass
 

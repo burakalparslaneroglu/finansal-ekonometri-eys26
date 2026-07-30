@@ -9,3 +9,6 @@ font = "sans serif"
 [server]
 headless = true
 enableCORS = false
+# Task D: uploads are held in memory only; 50 MB is ample for a daily return
+# panel and keeps a stray tick-data file from exhausting the app's memory.
+maxUploadSize = 50

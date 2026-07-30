@@ -26,8 +26,8 @@ COLORS = [
 # Utilities
 # ---------------------------------------------------------------------------
 
-def _asset_cols(df):
-    return [c for c in df.columns if not c.endswith("_RV") and not c.endswith("_BPV")]
+from ._utils import asset_cols as _asset_cols   # shared with Day 3
+from ._utils import df_key as _df_key           # sha1 content hash, not id()
 
 
 def _get_rv_bpv(df, asset):
@@ -355,7 +355,7 @@ Her oz değeri ayri buzur (Stieltjes donusumu).
         st.markdown("### Volatilite Imza Grafigi (Signature Plot)")
         df = st.session_state.returns_df
         ac = _asset_cols(df)
-        df_key = id(df)
+        df_key = _df_key(df)
 
         col_a, col_b, col_c = st.columns([2, 3, 2])
         with col_a:
@@ -500,7 +500,7 @@ Her oz değeri ayri buzur (Stieltjes donusumu).
             st.markdown("### HAR-RV Model Tahmini")
             df = st.session_state.returns_df
             ac = _asset_cols(df)
-            df_key = id(df)
+            df_key = _df_key(df)
 
             col_a, col_b, col_c = st.columns(3)
             with col_a:
@@ -653,7 +653,7 @@ Her oz değeri ayri buzur (Stieltjes donusumu).
             st.markdown("### Yüksek Frekanslı Oynaklık Modelleri")
             df = st.session_state.returns_df
             ac = _asset_cols(df)
-            df_key = id(df)
+            df_key = _df_key(df)
 
             col_a, col_b = st.columns([2, 3])
             with col_a:
@@ -830,16 +830,42 @@ Her oz değeri ayri buzur (Stieltjes donusumu).
             df = st.session_state.returns_df
             ac = _asset_cols(df)
             max_n = min(len(ac), 8)
-            df_key = id(df)
+            df_key = _df_key(df)
 
             col_a, col_b, col_c = st.columns(3)
             with col_a:
                 n_assets_cov = st.slider("Varlık Sayisi", 2, max_n, min(5, max_n), key="cov5_n")
             with col_b:
                 k_max = max(1, n_assets_cov - 1)
-                k_factors = st.slider("Faktor Sayisi (POET)", 1, k_max, min(3, k_max), key="cov5_k")
+                k_method5 = st.selectbox(
+                    "Faktör sayısı ölçütü",
+                    ["Manuel", "Bai-Ng ICp1", "Onatski ED", "Marchenko-Pastur"],
+                    key="cov5_kmethod",
+                )
             with col_c:
                 threshold = st.slider("Esik (POET)", 0.01, 0.50, 0.10, 0.01, key="cov5_thr")
+
+            # Faktör sayısı: manuel slider ya da üç ölçütten biri (Görev C.1 —
+            # bu tahmin ediciler artık paylaşılan factor_selection modülünde).
+            from factor_selection import select_k as _select_k
+            _R5 = df[ac[:n_assets_cov]].dropna().values
+            _sel5 = _select_k(_R5, method="Bai-Ng ICp1", k_max=k_max)
+
+            k_manual5 = st.slider("Faktor Sayisi (POET)", 1, k_max, min(3, k_max),
+                                  key="cov5_k",
+                                  disabled=(k_method5 != "Manuel"))
+            _kmap5 = {"Manuel": int(k_manual5), "Bai-Ng ICp1": _sel5["bai_ng"],
+                      "Onatski ED": _sel5["onatski"], "Marchenko-Pastur": _sel5["mp"]}
+            k_factors = max(1, min(int(_kmap5[k_method5]), k_max))
+
+            _on5 = str(_sel5["onatski"]) if _sel5["onatski_ok"] else "— (N küçük)"
+            st.caption(
+                f"Ölçütler (aynı korelasyon matrisi üzerinde): "
+                f"Bai-Ng ICp1 = {_sel5['bai_ng']} · "
+                f"Onatski ED = {_on5} · "
+                f"Marchenko-Pastur = {_sel5['mp']} (λ₊ = {_sel5['lambda_plus']:.2f}) "
+                f"→ kullanılan K = {k_factors}"
+            )
 
             # Cache key
             _key = f"d5_cov_{n_assets_cov}_{k_factors}_{threshold}_{df_key}"
@@ -978,7 +1004,7 @@ Her oz değeri ayri buzur (Stieltjes donusumu).
             df = st.session_state.returns_df
             ac = _asset_cols(df)
             max_n6 = min(len(ac), 8)
-            df_key = id(df)
+            df_key = _df_key(df)
 
             col_a, col_b, col_c = st.columns(3)
             with col_a:

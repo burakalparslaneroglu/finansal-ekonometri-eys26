@@ -6,14 +6,22 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+.pytest_cache/
+
+# Note: numba is used with plain @njit (no cache=True), so no on-disk JIT
+# artefacts are produced.  If cache=True is ever added, point NUMBA_CACHE_DIR
+# outside OneDrive first — a synced cache shared between machines with
+# different Python minor versions will serve stale objects.
 
 # Geliştirme artıkları (repo'ya dahil edilmeyecek)
-data_downloader.py
 data_generator.py
 extract_pdf.py
 extracted_text.txt
 find_pelve.py
 pelve_notes.txt
+codebase.txt
+codebase_mirror.txt
+*.bak_*
 
 # Ortam
 .env

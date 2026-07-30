@@ -17,9 +17,18 @@ Two regimes: N<T (c=0.2, sample cov well-defined) and N>T (c=1.5, sample cov
 singular -> shrinkage/factor methods essential).
 """
 from __future__ import annotations
+import os
+import sys
+
 import numpy as np
 from numba import njit
 from sklearn.covariance import LedoitWolf
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# The factor-count estimators moved to the shared module so that the Day-3
+# Factor-DCC tab and the Day-5 POET tab can use the same (corrected) code.
+from factor_selection import bai_ng_ic, mp_threshold_count, onatski_ed  # noqa: E402
 
 SEED = 20260731
 
@@ -96,58 +105,11 @@ def cov_poet(R, K, C=0.5):
 
 
 # ----------------------------------------------------------------------
-# Factor-count recovery
-# ----------------------------------------------------------------------
-def bai_ng_ic(R, k_max=10):
-    """Bai-Ng (2002) IC_{p1}: log-form, no sigma^2 multiplier."""
-    T, N = R.shape
-    X = R - R.mean(0)
-    U, s, Vt = np.linalg.svd(X, full_matrices=False)
-    ics = []
-    for k in range(1, k_max+1):
-        resid = X - (U[:, :k] * s[:k]) @ Vt[:k, :]
-        V_k = np.mean(resid**2)
-        g = (N + T)/(N*T) * np.log(N*T/(N+T))
-        ics.append(np.log(V_k) + k*g)
-    return int(np.argmin(ics) + 1)
-
-def mp_threshold_count(R):
-    """# eigenvalues of the sample CORRELATION matrix above the MP bulk edge."""
-    T, N = R.shape
-    Xc = (R - R.mean(0)) / R.std(0)
-    C = (Xc.T @ Xc) / T
-    ev = np.linalg.eigvalsh(C)
-    c = N / T
-    lam_plus = (1 + np.sqrt(c))**2
-    return int((ev > lam_plus).sum()), lam_plus, ev
-
-def onatski_ed(R, k_max=10, max_iter=100):
-    """Onatski (2010) Eigenvalue-Difference (ED) estimator, iterative form.
-    delta is recalibrated from the slope of eigenvalues (j..j+4) on
-    ((j-1)..(j+3))^{2/3}; R_hat(delta)=max{i<=k_max: lam_i - lam_{i+1} >= delta}."""
-    S = cov_sample(R)
-    ev = np.sort(np.linalg.eigvalsh(S))[::-1]
-    n = len(ev)
-    j = k_max + 1
-    R_prev = -1
-    for _ in range(max_iter):
-        if j + 4 >= n:
-            j = n - 5
-        y = ev[j-1:j+4]                              # lam_j .. lam_{j+4} (0-based j-1)
-        xreg = (np.arange(j, j+5) - 1.0)**(2.0/3.0)  # ((j-1)..(j+3))^{2/3}
-        xc = xreg - xreg.mean()
-        beta = (xc @ (y - y.mean())) / (xc @ xc)
-        delta = 2.0 * abs(beta)
-        diffs = ev[:k_max] - ev[1:k_max+1]
-        cand = np.where(diffs >= delta)[0]
-        R_hat = int(cand.max() + 1) if len(cand) else 0
-        if R_hat == R_prev:
-            break
-        R_prev = R_hat
-        j = R_hat + 1
-    return R_hat
-
-
+# Factor-count recovery: bai_ng_ic / mp_threshold_count / onatski_ed are
+# imported from factor_selection (see the import block at the top).  The
+# copies that used to live here demeaned without standardising, could not
+# return k=0, and ran Onatski on the covariance matrix while the MP rule ran
+# on the correlation matrix — all three fixed in the shared module.
 # ----------------------------------------------------------------------
 # Metrics
 # ----------------------------------------------------------------------
